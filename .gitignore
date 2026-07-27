@@ -1,10 +1,8 @@
-# Credentials & Secrets
-.env
-
-# Environments
+# Environment & Virtual Environments
 venv/
 env/
 ENV/
+.env
 .env/
 
 # Python Cache
@@ -13,15 +11,24 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Browser/Driver Temporary Logs
+# Browser & Driver Logs
 chromedriver.log
 geckodriver.log
 ghostdriver.log
+flow_error_debug.png
 
-# Exclude unrelated local files
-py1.py
+# Local Session & Stock Data Files
+session_*.txt
+token_stock.txt
 spotify_links.txt
 chatgpt_session.txt
-proxy_auth_plugin/
 allowed_users.json
+instructions.html
 
+# Unrelated Scripts & Folders
+py1.py
+py3.py
+latestgen/
+netflix/
+proxy_auth_plugin/
+upi-vippro-tool-api/
