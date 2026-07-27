@@ -19,6 +19,7 @@ flow_error_debug.png
 
 # Local Session & Stock Data Files
 session_*.txt
+accounts.txt
 token_stock.txt
 spotify_links.txt
 chatgpt_session.txt

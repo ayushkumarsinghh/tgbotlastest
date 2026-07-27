@@ -219,27 +219,20 @@ async def handle_update(http, update):
     if not text or not chat_id:
         return
 
-    # Check worker authorization
-    if not is_authorized(username):
-        await send_tg_message(http, chat_id, "❌ **Access Denied**: Only authorized users (like `@Sleepu69` and `@Royfumbler`) can use this bot.")
-        return
-
     # Command Handling
     cmd = text.split()[0].lower() if text else ""
 
     if cmd == "/start":
-        workers_list = ", ".join([f"@{w}" for w in AUTHORIZED_WORKERS])
         welcome_text = (
             "🤖 **Kakao Pay Auto Extraction Bot**\n\n"
-            f"📥 **Authorized Users**: {workers_list}\n\n"
-            "👑 **Commands**:\n"
+            "📥 **Anyone can add Access Tokens to stock!**\n"
+            "• Paste tokens directly or use `/tokeninput <tokens>`\n\n"
+            "👑 **Admin Commands**:\n"
             "• `/tokeninput <tokens>` — Add Access Tokens to stock\n"
             "• `/statustoken` — View current unused Access Tokens in stock\n"
             "• `/run` — Process tokens from stock for Kakao Pay extraction\n"
             "• `/setcdk <CDK_KEY>` — Set active Pupux CDK License Key\n"
             "• `/usetoken <NUMBER>` — Set max tokens per batch (default: 10)\n"
-            "• `/addworker <@username>` — Authorize user/admin\n"
-            "• `/removeworker <@username>` — Revoke user authorization\n"
             "• `/status` — View full bot configuration & stock summary"
         )
         await send_tg_message(http, chat_id, welcome_text)
@@ -255,7 +248,7 @@ async def handle_update(http, update):
             f"🔑 **Active CDK Key**: {cdk_display}\n"
             f"🔢 **Max Tokens Limit**: `{TOKEN_LIMIT}`\n"
             f"📦 **Stored Token Stock**: `{stock_count}` unused tokens\n"
-            f"👥 **Authorized Users**: {workers_str}\n"
+            f"👥 **Authorized Admins**: {workers_str}\n"
         )
         await send_tg_message(http, chat_id, msg)
         return
@@ -264,6 +257,29 @@ async def handle_update(http, update):
         stock_count = len(load_stock())
         await send_tg_message(http, chat_id, f"📦 **Current Token Stock**: `{stock_count}` unused Access Token(s) in pool.")
         return
+
+    if cmd == "/tokeninput":
+        parts = text.split(maxsplit=1)
+        raw_arg = parts[1] if len(parts) > 1 else ""
+        
+        reply_to = message.get("reply_to_message")
+        if not raw_arg and reply_to:
+            raw_arg = reply_to.get("text", "")
+
+        tokens = [line.strip() for line in raw_arg.splitlines() if line.strip().startswith("eyJ") or len(line.strip()) > 50]
+        if not tokens:
+            await send_tg_message(http, chat_id, "📥 **Token Input Mode**\nPlease paste Access Tokens right after `/tokeninput` or reply to a token message with `/tokeninput`.")
+            return
+
+        added, total_stock = add_to_stock(tokens)
+        await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` new Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
+        return
+
+    # Admin-only commands below (setcdk, usetoken, setlimit, addworker, removeworker, run)
+    if cmd in ["/setcdk", "/usetoken", "/setlimit", "/addworker", "/removeworker", "/run"]:
+        if not is_authorized(username):
+            await send_tg_message(http, chat_id, "❌ **Access Denied**: Only authorized admins can use this command.")
+            return
 
     if cmd == "/setcdk":
         parts = text.split(maxsplit=1)
@@ -290,7 +306,7 @@ async def handle_update(http, update):
             return
         un = parts[1].strip().lstrip('@').lower()
         AUTHORIZED_WORKERS.add(un)
-        await send_tg_message(http, chat_id, f"✅ **Authorized User Added!**\n@{un} can now use the bot.")
+        await send_tg_message(http, chat_id, f"✅ **Authorized Admin Added!**\n@{un} can now run extraction commands.")
         return
 
     if cmd == "/removeworker":
@@ -300,24 +316,7 @@ async def handle_update(http, update):
             return
         un = parts[1].strip().lstrip('@').lower()
         AUTHORIZED_WORKERS.discard(un)
-        await send_tg_message(http, chat_id, f"✅ **User Authorization Revoked!**\n@{un} can no longer use the bot.")
-        return
-
-    if cmd == "/tokeninput":
-        parts = text.split(maxsplit=1)
-        raw_arg = parts[1] if len(parts) > 1 else ""
-        
-        reply_to = message.get("reply_to_message")
-        if not raw_arg and reply_to:
-            raw_arg = reply_to.get("text", "")
-
-        tokens = [line.strip() for line in raw_arg.splitlines() if line.strip().startswith("eyJ") or len(line.strip()) > 50]
-        if not tokens:
-            await send_tg_message(http, chat_id, "📥 **Token Input Mode**\nPlease paste Access Tokens right after `/tokeninput` or reply to a token message with `/tokeninput`.")
-            return
-
-        added, total_stock = add_to_stock(tokens)
-        await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` new Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
+        await send_tg_message(http, chat_id, f"✅ **Admin Authorization Revoked!**\n@{un} can no longer run extraction commands.")
         return
 
     if cmd == "/run":
@@ -328,14 +327,16 @@ async def handle_update(http, update):
         await execute_extraction_batch(http, chat_id, selected_tokens)
         return
 
-    # Direct token paste
+    # Direct token paste from anyone (saves to stock automatically without requiring CDK)
     raw_lines = text.splitlines()
     tokens = [line.strip() for line in raw_lines if line.strip().startswith("eyJ") or len(line.strip()) > 50]
     if tokens:
         added, total_stock = add_to_stock(tokens)
-        selected_tokens, remaining_stock_count = pop_from_stock(TOKEN_LIMIT)
-        if selected_tokens:
-            await execute_extraction_batch(http, chat_id, selected_tokens)
+        await send_tg_message(
+            http, chat_id, 
+            f"✅ **{added} Access Token(s) Received & Saved to Stock!**\n"
+            f"📦 Total Unused Stock: `{total_stock}` token(s)."
+        )
 
 async def main():
     print(f"[System] Starting Kakao Pay Telegram Bot (Direct Telegram API)...")
