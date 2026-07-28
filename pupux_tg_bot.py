@@ -102,10 +102,12 @@ async def execute_extraction_batch(http, chat_id, tokens):
         await send_tg_message(http, chat_id, "❌ **CDK Key is not configured yet!**\nPlease set it using `/setcdk <CDK_KEY>`.")
         return
 
+    method_title = "UPI" if PAYMENT_METHOD.lower() == "upi" else "Kakao Pay"
+
     init_res = await send_tg_message(
         http, chat_id,
-        f"⏳ **Processing {len(tokens)} Kakao Pay Access Token(s)...**\n"
-        f"🔑 CDK: `{ACTIVE_CDK[:6]}...` | Limit: `{TOKEN_LIMIT}`"
+        f"⏳ **Processing {len(tokens)} {method_title} Access Token(s)...**\n"
+        f"💳 Method: `{PAYMENT_METHOD.upper()}` | 🔑 CDK: `{ACTIVE_CDK[:6]}...` | Limit: `{TOKEN_LIMIT}`"
     )
     status_msg_id = init_res.get("result", {}).get("message_id") if init_res else None
 
@@ -142,7 +144,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
         return
 
     if status_msg_id:
-        await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Submitted {submitted_count} Kakao Pay tasks.** Polling results...")
+        await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Submitted {submitted_count} {method_title} tasks.** Polling results...")
 
     # Map task_id -> sequential number (1, 2, 3...)
     task_num_map = {t["task_id"]: i + 1 for i, t in enumerate(tasks)}
@@ -169,7 +171,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
                         qr_url = res_obj.get("png_url") or res_obj.get("svg_url") or res_obj.get("qr_url")
 
                         card_text = (
-                            f"📦 **Kakao Pay Link #{num}**\n"
+                            f"📦 **{method_title} Link #{num}**\n"
                             f"🆔 Task ID: `{tid}`\n"
                             f"🔗 **Payment Link**:\n`{pay_url}`"
                         )
@@ -188,7 +190,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
                         summary_fail = fail_obj.get("summary") or st
                         await send_tg_message(
                             http, chat_id,
-                            f"❌ **Kakao Pay Link #{num} Failed** (Task ID: `{tid}`)\nReason: `{summary_fail}`"
+                            f"❌ **{method_title} Link #{num} Failed** (Task ID: `{tid}`)\nReason: `{summary_fail}`"
                         )
                         pending_task_ids.discard(tid)
         except Exception as poll_err:
@@ -196,7 +198,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
 
     remaining_stock = len(load_stock())
     final_text = (
-        f"✅ **Completed! Delivered {results_delivered}/{submitted_count} Kakao Pay Links.**\n"
+        f"✅ **Completed! Delivered {results_delivered}/{submitted_count} {method_title} Links.**\n"
         f"📦 Unused Stock Remaining: `{remaining_stock}` tokens."
     )
     if status_msg_id:
@@ -205,7 +207,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
         await send_tg_message(http, chat_id, final_text)
 
 async def handle_update(http, update):
-    global ACTIVE_CDK, TOKEN_LIMIT, AUTHORIZED_WORKERS
+    global ACTIVE_CDK, TOKEN_LIMIT, PAYMENT_METHOD, AUTHORIZED_WORKERS
 
     message = update.get("message") or update.get("edited_message")
     if not message:
@@ -224,13 +226,14 @@ async def handle_update(http, update):
 
     if cmd == "/start":
         welcome_text = (
-            "🤖 **Kakao Pay Auto Extraction Bot**\n\n"
+            "🤖 **Pupux Pay Link Extraction Bot**\n\n"
             "📥 **Anyone can add Access Tokens to stock!**\n"
             "• Paste tokens directly or use `/tokeninput <tokens>`\n\n"
             "👑 **Admin Commands**:\n"
             "• `/tokeninput <tokens>` — Add Access Tokens to stock\n"
             "• `/statustoken` — View current unused Access Tokens in stock\n"
-            "• `/run` — Process tokens from stock for Kakao Pay extraction\n"
+            "• `/run` — Process tokens from stock for link extraction\n"
+            "• `/setpayment <kakao|upi>` — Set payment method (`kakao` or `upi`)\n"
             "• `/setcdk <CDK_KEY>` — Set active Pupux CDK License Key\n"
             "• `/usetoken <NUMBER>` — Set max tokens per batch (default: 10)\n"
             "• `/status` — View full bot configuration & stock summary"
@@ -244,7 +247,7 @@ async def handle_update(http, update):
         stock_count = len(load_stock())
         msg = (
             "📊 **Bot Configuration Status**\n\n"
-            f"💳 **Payment Method**: `Kakao Pay` (Hardcoded)\n"
+            f"💳 **Payment Method**: `{PAYMENT_METHOD.upper()}`\n"
             f"🔑 **Active CDK Key**: {cdk_display}\n"
             f"🔢 **Max Tokens Limit**: `{TOKEN_LIMIT}`\n"
             f"📦 **Stored Token Stock**: `{stock_count}` unused tokens\n"
@@ -275,11 +278,24 @@ async def handle_update(http, update):
         await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` new Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
         return
 
-    # Admin-only commands below (setcdk, usetoken, setlimit, addworker, removeworker, run)
-    if cmd in ["/setcdk", "/usetoken", "/setlimit", "/addworker", "/removeworker", "/run"]:
+    # Admin-only commands below (setcdk, setpayment, usetoken, setlimit, addworker, removeworker, run)
+    if cmd in ["/setcdk", "/setpayment", "/payment", "/usetoken", "/setlimit", "/addworker", "/removeworker", "/run"]:
         if not is_authorized(username):
             await send_tg_message(http, chat_id, "❌ **Access Denied**: Only authorized admins can use this command.")
             return
+
+    if cmd in ["/setpayment", "/payment"]:
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            await send_tg_message(http, chat_id, "⚠️ **Usage**: `/setpayment <kakao|upi>` (e.g. `/setpayment upi`)")
+            return
+        method_input = parts[1].strip().lower()
+        if method_input not in ["kakao", "upi"]:
+            await send_tg_message(http, chat_id, "❌ Invalid payment method! Choose either `kakao` or `upi`.")
+            return
+        PAYMENT_METHOD = method_input
+        await send_tg_message(http, chat_id, f"✅ **Payment Method Updated!**\nNow using: `{PAYMENT_METHOD.upper()}`")
+        return
 
     if cmd == "/setcdk":
         parts = text.split(maxsplit=1)
