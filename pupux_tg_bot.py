@@ -96,26 +96,23 @@ async def edit_tg_message(http, chat_id, message_id, text, parse_mode="Markdown"
     except Exception as e:
         logger.error(f"Failed to edit message: {e}")
 
-async def execute_extraction_batch(http, chat_id, tokens, target_method=None):
-    global ACTIVE_CDK, TOKEN_LIMIT, PAYMENT_METHOD
+async def execute_extraction_batch(http, chat_id, tokens):
+    global ACTIVE_CDK, TOKEN_LIMIT
 
     if not ACTIVE_CDK:
         await send_tg_message(http, chat_id, "❌ **CDK Key is not configured yet!**\nPlease set it using `/setcdk <CDK_KEY>`.")
         return
 
-    used_method = (target_method or PAYMENT_METHOD).lower()
-    method_title = "UPI" if used_method == "upi" else "Kakao Pay"
-
     init_res = await send_tg_message(
         http, chat_id,
-        f"⏳ **Processing {len(tokens)} {method_title} Access Token(s)...**\n"
-        f"💳 Method: `{used_method.upper()}` | 🔑 CDK: `{ACTIVE_CDK[:6]}...` | Limit: `{TOKEN_LIMIT}`"
+        f"⏳ **Processing {len(tokens)} Kakao Pay Access Token(s)...**\n"
+        f"🔑 CDK: `{ACTIVE_CDK[:6]}...` | Limit: `{TOKEN_LIMIT}`"
     )
     status_msg_id = init_res.get("result", {}).get("message_id") if init_res else None
 
-    # 1. Submit Tasks Batch to Pupux API
+    # 1. Submit Tasks Batch to Pupux API (Hardcoded Kakao Pay)
     payload = {
-        "payment_method": used_method,
+        "payment_method": "kakao",
         "cdk": ACTIVE_CDK,
         "access_tokens": tokens
     }
@@ -146,7 +143,7 @@ async def execute_extraction_batch(http, chat_id, tokens, target_method=None):
         return
 
     if status_msg_id:
-        await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Submitted {submitted_count} {method_title} tasks.** Polling results...")
+        await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Submitted {submitted_count} Kakao Pay tasks.** Polling results...")
 
     # Map task_id -> sequential number (1, 2, 3...)
     task_num_map = {t["task_id"]: i + 1 for i, t in enumerate(tasks)}
@@ -173,7 +170,7 @@ async def execute_extraction_batch(http, chat_id, tokens, target_method=None):
                         qr_url = res_obj.get("png_url") or res_obj.get("svg_url") or res_obj.get("qr_url")
 
                         card_text = (
-                            f"📦 **{method_title} Link #{num}**\n"
+                            f"📦 **Kakao Pay Link #{num}**\n"
                             f"🆔 Task ID: `{tid}`\n"
                             f"🔗 **Payment Link**:\n`{pay_url}`"
                         )
@@ -192,7 +189,7 @@ async def execute_extraction_batch(http, chat_id, tokens, target_method=None):
                         summary_fail = fail_obj.get("summary") or st
                         await send_tg_message(
                             http, chat_id,
-                            f"❌ **{method_title} Link #{num} Failed** (Task ID: `{tid}`)\nReason: `{summary_fail}`"
+                            f"❌ **Kakao Pay Link #{num} Failed** (Task ID: `{tid}`)\nReason: `{summary_fail}`"
                         )
                         pending_task_ids.discard(tid)
         except Exception as poll_err:
@@ -200,7 +197,7 @@ async def execute_extraction_batch(http, chat_id, tokens, target_method=None):
 
     remaining_stock = len(load_stock())
     final_text = (
-        f"✅ **Completed! Delivered {results_delivered}/{submitted_count} {method_title} Links.**\n"
+        f"✅ **Completed! Delivered {results_delivered}/{submitted_count} Kakao Pay Links.**\n"
         f"📦 Unused Stock Remaining: `{remaining_stock}` tokens."
     )
     if status_msg_id:
@@ -209,59 +206,8 @@ async def execute_extraction_batch(http, chat_id, tokens, target_method=None):
         await send_tg_message(http, chat_id, final_text)
 
 async def handle_update(http, update):
-    global ACTIVE_CDK, TOKEN_LIMIT, PAYMENT_METHOD, AUTHORIZED_WORKERS
+    global ACTIVE_CDK, TOKEN_LIMIT, AUTHORIZED_WORKERS
 
-    # 1. Handle Inline Button Callbacks (callback_query)
-    callback_query = update.get("callback_query")
-    if callback_query:
-        cb_id = callback_query.get("id")
-        cb_data = callback_query.get("data", "")
-        message = callback_query.get("message") or {}
-        chat_id = message.get("chat", {}).get("id")
-        from_user = callback_query.get("from", {})
-        username = from_user.get("username", "")
-
-        # Acknowledge callback
-        try:
-            async with http.post(f"{TG_API}/answerCallbackQuery", json={"callback_query_id": cb_id}) as r:
-                pass
-        except Exception:
-            pass
-
-        if not chat_id:
-            return
-
-        if cb_data in ["gen_kakao", "gen_upi"]:
-            if not is_authorized(username):
-                await send_tg_message(http, chat_id, "❌ **Access Denied**: Only authorized admins can run extraction.")
-                return
-            target_method = "kakao" if cb_data == "gen_kakao" else "upi"
-            selected_tokens, remaining_stock_count = pop_from_stock(TOKEN_LIMIT)
-            if not selected_tokens:
-                await send_tg_message(http, chat_id, "❌ **Token Stock is Empty!** Use `/tokeninput` to add tokens first.")
-                return
-            await execute_extraction_batch(http, chat_id, selected_tokens, target_method=target_method)
-            return
-
-        if cb_data == "view_status":
-            cdk_display = f"`{ACTIVE_CDK}`" if ACTIVE_CDK else "❌ *Not Set*"
-            stock_count = len(load_stock())
-            await send_tg_message(
-                http, chat_id,
-                f"📊 **Bot Configuration Status**\n\n"
-                f"💳 **Default Method**: `{PAYMENT_METHOD.upper()}`\n"
-                f"🔑 **Active CDK Key**: {cdk_display}\n"
-                f"🔢 **Max Tokens Limit**: `{TOKEN_LIMIT}`\n"
-                f"📦 **Stored Token Stock**: `{stock_count}` unused tokens"
-            )
-            return
-
-        if cb_data == "view_stock":
-            stock_count = len(load_stock())
-            await send_tg_message(http, chat_id, f"📦 **Current Token Stock**: `{stock_count}` unused Access Token(s) in pool.")
-            return
-
-    # 2. Handle Text Messages & Commands
     message = update.get("message") or update.get("edited_message")
     if not message:
         return
@@ -279,31 +225,18 @@ async def handle_update(http, update):
 
     if cmd == "/start":
         welcome_text = (
-            "🤖 **Pupux Pay Link Extraction Bot**\n\n"
+            "🤖 **Kakao Pay Auto Extraction Bot**\n\n"
             "📥 **Anyone can add Access Tokens to stock!**\n"
             "• Paste tokens directly or use `/tokeninput <tokens>`\n\n"
             "👑 **Commands**:\n"
-            "• `/run` — Choose payment method & generate links\n"
             "• `/tokeninput <tokens>` — Add Access Tokens to stock\n"
             "• `/statustoken` — View current unused Access Tokens in stock\n"
-            "• `/setpayment <kakao|upi>` — Set default payment method\n"
+            "• `/run` — Process tokens from stock for Kakao Pay extraction\n"
             "• `/setcdk <CDK_KEY>` — Set active Pupux CDK License Key\n"
             "• `/usetoken <NUMBER>` — Set max tokens per batch (default: 10)\n"
             "• `/status` — View full bot configuration & stock summary"
         )
-        reply_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "💳 Generate Kakao Pay", "callback_data": "gen_kakao"},
-                    {"text": "🇮🇳 Generate UPI", "callback_data": "gen_upi"}
-                ],
-                [
-                    {"text": "📦 View Stock", "callback_data": "view_stock"},
-                    {"text": "📊 Bot Status", "callback_data": "view_status"}
-                ]
-            ]
-        }
-        await send_tg_message(http, chat_id, welcome_text, reply_markup=reply_markup)
+        await send_tg_message(http, chat_id, welcome_text)
         return
 
     if cmd == "/status":
@@ -312,7 +245,7 @@ async def handle_update(http, update):
         stock_count = len(load_stock())
         msg = (
             "📊 **Bot Configuration Status**\n\n"
-            f"💳 **Default Payment Method**: `{PAYMENT_METHOD.upper()}`\n"
+            f"💳 **Payment Method**: `Kakao Pay` (Hardcoded)\n"
             f"🔑 **Active CDK Key**: {cdk_display}\n"
             f"🔢 **Max Tokens Limit**: `{TOKEN_LIMIT}`\n"
             f"📦 **Stored Token Stock**: `{stock_count}` unused tokens\n"
@@ -343,24 +276,11 @@ async def handle_update(http, update):
         await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` new Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
         return
 
-    # Admin-only commands below (setcdk, setpayment, usetoken, setlimit, addworker, removeworker, run)
-    if cmd in ["/setcdk", "/setpayment", "/payment", "/usetoken", "/setlimit", "/addworker", "/removeworker", "/run"]:
+    # Admin-only commands below (setcdk, usetoken, setlimit, addworker, removeworker, run)
+    if cmd in ["/setcdk", "/usetoken", "/setlimit", "/addworker", "/removeworker", "/run"]:
         if not is_authorized(username):
             await send_tg_message(http, chat_id, "❌ **Access Denied**: Only authorized admins can use this command.")
             return
-
-    if cmd in ["/setpayment", "/payment"]:
-        parts = text.split(maxsplit=1)
-        if len(parts) < 2:
-            await send_tg_message(http, chat_id, "⚠️ **Usage**: `/setpayment <kakao|upi>` (e.g. `/setpayment upi`)")
-            return
-        method_input = parts[1].strip().lower()
-        if method_input not in ["kakao", "upi"]:
-            await send_tg_message(http, chat_id, "❌ Invalid payment method! Choose either `kakao` or `upi`.")
-            return
-        PAYMENT_METHOD = method_input
-        await send_tg_message(http, chat_id, f"✅ **Payment Method Updated!**\nDefault method: `{PAYMENT_METHOD.upper()}`")
-        return
 
     if cmd == "/setcdk":
         parts = text.split(maxsplit=1)
@@ -401,25 +321,11 @@ async def handle_update(http, update):
         return
 
     if cmd == "/run":
-        stock_count = len(load_stock())
-        if stock_count == 0:
+        selected_tokens, remaining_stock_count = pop_from_stock(TOKEN_LIMIT)
+        if not selected_tokens:
             await send_tg_message(http, chat_id, "❌ **Token Stock is Empty!** Use `/tokeninput` to add tokens first.")
             return
-
-        reply_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "💳 Kakao Pay", "callback_data": "gen_kakao"},
-                    {"text": "🇮🇳 UPI", "callback_data": "gen_upi"}
-                ]
-            ]
-        }
-        await send_tg_message(
-            http, chat_id,
-            f"📦 **Token Stock Available**: `{stock_count}` unused token(s)\n"
-            f"👇 **Select payment method to generate for this batch:**",
-            reply_markup=reply_markup
-        )
+        await execute_extraction_batch(http, chat_id, selected_tokens)
         return
 
     # Direct token paste from anyone (saves to stock automatically without requiring CDK)
@@ -427,20 +333,10 @@ async def handle_update(http, update):
     tokens = [line.strip() for line in raw_lines if line.strip().startswith("eyJ") or len(line.strip()) > 50]
     if tokens:
         added, total_stock = add_to_stock(tokens)
-        reply_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "💳 Generate Kakao Pay", "callback_data": "gen_kakao"},
-                    {"text": "🇮🇳 Generate UPI", "callback_data": "gen_upi"}
-                ]
-            ]
-        }
         await send_tg_message(
             http, chat_id, 
             f"✅ **{added} Access Token(s) Received & Saved to Stock!**\n"
-            f"📦 Total Unused Stock: `{total_stock}` token(s).\n\n"
-            f"👇 **Tap a button to generate links now:**",
-            reply_markup=reply_markup
+            f"📦 Total Unused Stock: `{total_stock}` token(s)."
         )
 
 async def main():
