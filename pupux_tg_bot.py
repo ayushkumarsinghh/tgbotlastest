@@ -1,39 +1,58 @@
+import subprocess
+
+# --- AUTO-DEPENDENCY INSTALLER ---
+def _ensure_package(pkg_name, import_name=None):
+    import_name = import_name or pkg_name
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"Installing missing dependency: {pkg_name}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
+
+for _pkg, _imp in [("aiohttp", "aiohttp"), ("curl_cffi", "curl_cffi"), ("pyotp", "pyotp"), ("pydantic", "pydantic")]:
+    _ensure_package(_pkg, _imp)
+
 import asyncio
 import aiohttp
 import os
 import sys
 import logging
+import time
 
 import json
 import re
 
 # --- CONFIGURATION ---
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8711939395:AAFqMmnEZaVhJ2kk04aLft2llUP8iDOU8G8")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8845844055:AAHo-MDyyhRjX0SkHebQ9AjM-TSGLqG0Ap4")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-PUPUX_API_BASE = "https://ai.pupux.xyz/api/paylinks"
-
-# Discord Channels Config (Set DISCORD_TOKEN in Railway Env Variables)
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
-DISCORD_INPUT_CHANNEL_ID = os.getenv("DISCORD_INPUT_CHANNEL_ID", "1532592499678384248").strip()
-DISCORD_DB_CHANNEL_ID = os.getenv("DISCORD_DB_CHANNEL_ID", "1532594541742395425").strip()
-LAST_DISCORD_MSG_ID = None
-LAST_TG_CHAT_ID = None
+MASI_API_BASE = "https://masi.cc.cd"
 
 # Default runtime state
 ACTIVE_CDK = os.getenv("PUPUX_CDK", "")
 TOKEN_LIMIT = int(os.getenv("PUPUX_TOKEN_LIMIT", "10"))
 PAYMENT_METHOD = "kakao"  # Hardcoded to Kakao pay
 AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Initial authorized admins (lowercase)
+STOCK_FILE = "token_stock.txt"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 from curl_cffi.requests import AsyncSession
 
-# Add upi-vippro-tool-api to sys.path
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "upi-vippro-tool-api"))
+# --- AUTO-AUTHENTICATION ENGINE LOADER ---
+repo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upi-vippro-tool-api")
+if not os.path.exists(os.path.join(repo_dir, "app", "login_service.py")):
+    logger.info("[Auto-Setup] Missing upi-vippro-tool-api engine. Cloning from GitHub...")
+    try:
+        subprocess.check_call(["git", "clone", "https://github.com/6c696e68/upi-vippro-tool-api.git", repo_dir])
+    except Exception as _clone_err:
+        logger.error(f"[Auto-Setup] Failed to clone upi-vippro-tool-api: {_clone_err}")
+
+if repo_dir not in sys.path:
+    sys.path.append(repo_dir)
+
 try:
-    from app.login_service import login_pure_request, LoginError
+    from app.login_service import login_pure_request, LoginError  # type: ignore # pyright: ignore[reportMissingImports]
 except Exception as err:
     logger.warning(f"Could not import login_service: {err}")
 
@@ -106,10 +125,22 @@ async def process_and_extract_credentials(text, http=None, chat_id=None):
                 if token:
                     tokens.append(token)
                     if chat_id and http:
-                        await send_tg_message(http, chat_id, f"`{email}` ({plan.upper()}): **Logged In & Access Token Generated!**")
-                        # If CDK key is set, automatically trigger Pupux Kakao Pay QR Code generation!
-                        if ACTIVE_CDK:
-                            asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
+                        if plan.lower() in ("plus", "team", "pro"):
+                            await send_tg_message(
+                                http, chat_id, 
+                                f"`{email}` (**{plan.upper()}**):\n\n"
+                                f"**Access Token**:\n`{token}`\n\n"
+                                f"Account is already **{plan.upper()}**! Skipped Kakao Pay link extraction."
+                            )
+                        else:
+                            await send_tg_message(
+                                http, chat_id, 
+                                f"`{email}` (**{plan.upper()}**):\n\n"
+                                f"**Access Token**:\n`{token}`"
+                            )
+                            # If CDK key is set, automatically trigger Kakao Pay link extraction for FREE accounts!
+                            if ACTIVE_CDK:
+                                asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
                 else:
                     if chat_id and http:
                         await send_tg_message(http, chat_id, status_msg)
@@ -309,7 +340,7 @@ async def edit_tg_message(http, chat_id, message_id, text, parse_mode="Markdown"
         logger.error(f"Failed to edit message: {e}")
 
 async def execute_extraction_batch(http, chat_id, tokens):
-    global ACTIVE_CDK, TOKEN_LIMIT
+    global ACTIVE_CDK
 
     if not ACTIVE_CDK:
         await send_tg_message(http, chat_id, "**CDK Key is not configured yet!**\nPlease set it using `/setcdk <CDK_KEY>`.")
@@ -317,108 +348,94 @@ async def execute_extraction_batch(http, chat_id, tokens):
 
     init_res = await send_tg_message(
         http, chat_id,
-        f"**Processing {len(tokens)} Kakao Pay Access Token(s)...**\n"
-        f"CDK: `{ACTIVE_CDK[:6]}...` | Limit: `{TOKEN_LIMIT}`"
+        f"**Extracting Kakao Pay Link for {len(tokens)} token(s)...**\n"
+        f"CDK: `{ACTIVE_CDK[:6]}...`"
     )
     status_msg_id = init_res.get("result", {}).get("message_id") if init_res else None
 
-    # 1. Submit Tasks Batch to Pupux API (Hardcoded Kakao Pay)
-    payload = {
-        "payment_method": "kakao",
-        "cdk": ACTIVE_CDK,
-        "access_tokens": tokens
+    headers = {
+        "X-CDK": ACTIVE_CDK,
+        "Content-Type": "application/json"
     }
-    
-    try:
-        async with http.post(f"{PUPUX_API_BASE}/tasks/batch", json=payload, timeout=20) as resp:
-            res = await resp.json()
-            if not res.get("ok"):
-                error_detail = res.get("detail", "Unknown error")
-                if status_msg_id:
-                    await edit_tg_message(http, chat_id, status_msg_id, f"**API Submission Failed**\nReason: `{error_detail}`")
-                else:
-                    await send_tg_message(http, chat_id, f"**API Submission Failed**\nReason: `{error_detail}`")
-                return
 
-            tasks = res.get("tasks", [])
-            submitted_count = res.get("submitted", 0)
-    except Exception as err:
-        if status_msg_id:
-            await edit_tg_message(http, chat_id, status_msg_id, f"**Connection Error**: Failed to reach Pupux API (`{err}`)")
-        else:
-            await send_tg_message(http, chat_id, f"**Connection Error**: Failed to reach Pupux API (`{err}`)")
-        return
-
-    if not tasks:
-        if status_msg_id:
-            await edit_tg_message(http, chat_id, status_msg_id, "No tasks returned from API submission.")
-        return
-
-    if status_msg_id:
-        await edit_tg_message(http, chat_id, status_msg_id, f"**Submitted {submitted_count} Kakao Pay tasks.** Polling results...")
-
-    # Map task_id -> sequential number (1, 2, 3...)
-    task_num_map = {t["task_id"]: i + 1 for i, t in enumerate(tasks)}
-    pending_task_ids = set(task_num_map.keys())
-
-    # 2. Poll status until all tasks complete
     results_delivered = 0
-    while pending_task_ids:
-        await asyncio.sleep(3)
-        ids_str = ",".join(list(pending_task_ids)[:50]) # max 50 per status check
+    for idx, token in enumerate(tokens, 1):
         try:
-            async with http.get(f"{PUPUX_API_BASE}/tasks/statuses?task_ids={ids_str}", timeout=15) as s_resp:
-                s_res = await s_resp.json()
-                items = s_res.get("items", [])
-                
-                for item in items:
-                    tid = item.get("task_id")
-                    st = item.get("status")
-                    
-                    if st == "succeeded":
-                        num = task_num_map.get(tid, 1)
-                        res_obj = item.get("result") or {}
-                        pay_url = res_obj.get("payment_url", "N/A")
-                        qr_url = res_obj.get("png_url") or res_obj.get("svg_url") or res_obj.get("qr_url")
+            # 1. Create Job: POST https://masi.cc.cd/v1/kakao/jobs
+            create_payload = {"access_token": token}
+            logger.info(f"[Masi API] Submitting token #{idx} to {MASI_API_BASE}/v1/kakao/jobs with CDK {ACTIVE_CDK[:6]}...")
+            async with http.post(f"{MASI_API_BASE}/v1/kakao/jobs", headers=headers, json=create_payload, timeout=30) as resp:
+                resp_text = await resp.text()
+                logger.info(f"[Masi API] Create job status={resp.status}, body={resp_text}")
+                try:
+                    res = json.loads(resp_text)
+                except Exception:
+                    res = {}
 
-                        card_text = (
-                            f"**Kakao Pay Link #{num}**\n"
-                            f"Task ID: `{tid}`\n"
-                            f"**Payment Link**:\n`{pay_url}`"
-                        )
+                if resp.status != 200 or not res.get("ok"):
+                    err_msg = res.get("error") or res.get("detail") or f"HTTP {resp.status}: {resp_text[:100]}"
+                    await send_tg_message(http, chat_id, f"**Job Submission Failed for Token #{idx}**\nReason: `{err_msg}`")
+                    continue
 
-                        if qr_url:
-                            await send_tg_photo(http, chat_id, qr_url, caption=card_text)
-                        else:
-                            await send_tg_message(http, chat_id, card_text)
+                job_info = res.get("job") or {}
+                job_id = job_info.get("job_id")
 
-                        pending_task_ids.discard(tid)
-                        results_delivered += 1
+            if not job_id:
+                await send_tg_message(http, chat_id, f"**Job Submission Error for Token #{idx}**: No job_id returned.")
+                continue
 
-                    elif st in ["failed", "cancelled", "stale"]:
-                        num = task_num_map.get(tid, 1)
-                        fail_obj = item.get("failure") or {}
-                        summary_fail = fail_obj.get("summary") or st
-                        await send_tg_message(
-                            http, chat_id,
-                            f"**Kakao Pay Link #{num} Failed** (Task ID: `{tid}`)\nReason: `{summary_fail}`"
-                        )
-                        pending_task_ids.discard(tid)
-        except Exception as poll_err:
-            logger.error(f"Polling error: {poll_err}")
+            if status_msg_id:
+                await edit_tg_message(http, chat_id, status_msg_id, f"**Job #{idx} Queued (ID: `{job_id}`)**. Extracting link...")
 
-    remaining_stock = len(load_stock())
-    final_text = (
-        f"**Completed! Delivered {results_delivered}/{submitted_count} Kakao Pay Links.**\n"
-        f"Unused Stock Remaining: `{remaining_stock}` tokens."
-    )
+            # 2. Poll Job Status: GET https://masi.cc.cd/v1/kakao/jobs/{job_id}
+            poll_headers = {"X-CDK": ACTIVE_CDK}
+            start_poll = time.time()
+            extracted_link = None
+
+            while time.time() - start_poll < 120:  # Timeout after 2 minutes per job
+                await asyncio.sleep(2.5)
+                try:
+                    async with http.get(f"{MASI_API_BASE}/v1/kakao/jobs/{job_id}", headers=poll_headers, timeout=30) as p_resp:
+                        p_text = await p_resp.text()
+                        try:
+                            p_res = json.loads(p_text)
+                        except Exception:
+                            p_res = {}
+                        job_data = p_res.get("job") or {}
+                        st = job_data.get("status")
+                        logger.info(f"[Masi API] Poll job {job_id} status={st}, body={p_text}")
+
+                        if st == "completed":
+                            output = job_data.get("output") or {}
+                            extracted_link = output.get("long_url")
+                            break
+                        elif st in ("failed", "canceled", "cancelled"):
+                            err_reason = job_data.get("error") or st
+                            await send_tg_message(http, chat_id, f"**Extraction Failed for Token #{idx}** (Job ID: `{job_id}`)\nReason: `{err_reason}`")
+                            break
+                except Exception as poll_err:
+                    logger.error(f"Polling error for job {job_id}: {poll_err}")
+
+            if extracted_link:
+                results_delivered += 1
+                msg_text = (
+                    f"**Access Token**:\n`{token}`\n\n"
+                    f"**Payment Link**:\n`{extracted_link}`"
+                )
+                await send_tg_message(http, chat_id, msg_text)
+
+        except Exception as job_err:
+            logger.error(f"Job execution error for token #{idx}: {job_err}")
+            await send_tg_message(http, chat_id, f"**Extraction Error for Token #{idx}**: `{job_err}`")
+
+    final_text = f"**Completed! Delivered {results_delivered}/{len(tokens)} Kakao Pay Link(s).**"
     if status_msg_id:
         await edit_tg_message(http, chat_id, status_msg_id, final_text)
     else:
         await send_tg_message(http, chat_id, final_text)
 
 async def handle_update(http, update):
-    global ACTIVE_CDK, TOKEN_LIMIT, AUTHORIZED_WORKERS, LAST_TG_CHAT_ID
+    global ACTIVE_CDK, AUTHORIZED_WORKERS, LAST_TG_CHAT_ID
 
     message = update.get("message") or update.get("edited_message")
     if not message:
@@ -444,14 +461,14 @@ async def handle_update(http, update):
 
     if cmd == "/start":
         welcome_text = (
-            "**Kakao Pay Instant QR Bot**\n\n"
-            "**Quick Kakao Pay QR Generation**:\n"
+            "**Kakao Pay Instant Link Extractor**\n\n"
+            "**Quick Kakao Pay Link Generation**:\n"
             "• Simply paste `email|password|2fa_secret` or send `/run email|password|2fa_secret`!\n"
-            "• Pure-HTTP authenticates in 1-2s and delivers your **Kakao Pay QR Code & Payment Link** directly!\n\n"
+            "• Pure-HTTP authenticates in 1-2s and delivers your **Kakao Pay Payment Link** directly!\n\n"
             "**Commands**:\n"
-            "• `/run <email|pass|2fa>` — Generate Kakao Pay QR & Payment Link directly\n"
-            "• `/setcdk <CDK_KEY>` — Set active Pupux CDK License Key\n"
-            "• `/status` — View full bot configuration & CDK status\n"
+            "• `/run <email|pass|2fa>` — Extract Kakao Pay Payment Link directly\n"
+            "• `/setcdk <CDK_KEY>` — Set active CDK License Key\n"
+            "• `/status` — View bot configuration & CDK quota stats\n"
             "• `/adduser <@username>` — Authorize a new user\n"
             "• `/removeuser <@username>` — Revoke a user's access"
         )
@@ -461,11 +478,34 @@ async def handle_update(http, update):
     if cmd == "/status":
         cdk_display = f"`{ACTIVE_CDK}`" if ACTIVE_CDK else "*Not Set* (Use `/setcdk <KEY>`)"
         workers_str = ", ".join([f"@{w}" for w in AUTHORIZED_WORKERS]) if AUTHORIZED_WORKERS else "None"
+        
+        cdk_info_text = ""
+        if ACTIVE_CDK:
+            try:
+                headers = {"X-CDK": ACTIVE_CDK}
+                async with http.get(f"{MASI_API_BASE}/v1/cdk/status", headers=headers, timeout=10) as cdk_resp:
+                    cdk_res = await cdk_resp.json()
+                    if cdk_res.get("ok"):
+                        stats = cdk_res.get("cdk") or {}
+                        rem = stats.get("remaining_uses", "N/A")
+                        tot = stats.get("total_uses", "N/A")
+                        avail = stats.get("available_uses", "N/A")
+                        pend = stats.get("pending_uses", "N/A")
+                        cdk_info_text = (
+                            f"\n**CDK Quota Stats**:\n"
+                            f"• Remaining Uses: `{rem}` / `{tot}`\n"
+                            f"• Available Uses: `{avail}`\n"
+                            f"• Pending Uses: `{pend}`\n"
+                        )
+            except Exception as cdk_err:
+                logger.warning(f"Failed to fetch CDK status: {cdk_err}")
+
         msg = (
             "**Bot Configuration Status**\n\n"
-            f"**Payment Method**: `Kakao Pay` (Hardcoded)\n"
+            f"**API Provider**: `https://masi.cc.cd` (Pure Extraction API)\n"
             f"**Active CDK Key**: {cdk_display}\n"
             f"**Authorized Users**: {workers_str}\n"
+            f"{cdk_info_text}"
         )
         await send_tg_message(http, chat_id, msg)
         return
