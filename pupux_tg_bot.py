@@ -27,9 +27,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8845844055:AAHo-MDyyhRjX0SkHebQ9AjM-TSGLqG0A
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 MASI_API_BASE = "https://masi.cc.cd"
 
-# Default runtime state
-ACTIVE_CDK = os.getenv("PUPUX_CDK", "")
-TOKEN_LIMIT = int(os.getenv("PUPUX_TOKEN_LIMIT", "10"))
+PROXY_URL = "http://sleepiness29:pmfMiEZSvK@66.93.161.197:50100"  # Hardcoded US Proxy
+TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
 PAYMENT_METHOD = "kakao"  # Hardcoded to Kakao pay
 AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Initial authorized admins (lowercase)
 STOCK_FILE = "token_stock.txt"
@@ -69,9 +68,9 @@ async def login_account_credential(cred_str):
     password = parts[1].strip()
     totp_secret = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else None
 
-    logger.info(f"[Pure-HTTP Auth] Logging in {email}...")
+    logger.info(f"[Pure-HTTP Auth] Logging in {email} via Proxy ({PROXY_URL.split('@')[-1]})...")
     try:
-        async with AsyncSession(impersonate="chrome124", timeout=25) as session:
+        async with AsyncSession(impersonate="chrome124", proxy=PROXY_URL if PROXY_URL else None, timeout=25) as session:
             session_entry = await login_pure_request(email, password, totp_secret, session, logger)
             if session_entry and session_entry.access_token:
                 # Detect subscription plan (Plus vs Free)
@@ -138,9 +137,10 @@ async def process_and_extract_credentials(text, http=None, chat_id=None):
                                 f"`{email}` (**{plan.upper()}**):\n\n"
                                 f"**Access Token**:\n`{token}`"
                             )
-                            # If CDK key is set, automatically trigger Kakao Pay link extraction for FREE accounts!
                             if ACTIVE_CDK:
                                 asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
+                            else:
+                                await send_tg_message(http, chat_id, "**CDK Key is not set!** Please run `/setcdk YOUR_CDK_KEY` in Telegram to enable Kakao Pay link extraction.")
                 else:
                     if chat_id and http:
                         await send_tg_message(http, chat_id, status_msg)
@@ -467,6 +467,7 @@ async def handle_update(http, update):
             "• Pure-HTTP authenticates in 1-2s and delivers your **Kakao Pay Payment Link** directly!\n\n"
             "**Commands**:\n"
             "• `/run <email|pass|2fa>` — Extract Kakao Pay Payment Link directly\n"
+            "• `/check <email|pass|2fa>` — Check account plan (Plus/Free) & get Access Token (0 CDK cost)\n"
             "• `/setcdk <CDK_KEY>` — Set active CDK License Key\n"
             "• `/status` — View bot configuration & CDK quota stats\n"
             "• `/adduser <@username>` — Authorize a new user\n"
@@ -517,6 +518,38 @@ async def handle_update(http, update):
             return
         ACTIVE_CDK = parts[1].strip()
         await send_tg_message(http, chat_id, f"**CDK Key Updated Successfully!**\nNew CDK: `{ACTIVE_CDK}`")
+        return
+
+    if cmd in ["/check", "/chk"]:
+        parts = text.split(maxsplit=1)
+        raw_arg = parts[1] if len(parts) > 1 else ""
+        
+        reply_to = message.get("reply_to_message")
+        if not raw_arg and reply_to:
+            raw_arg = reply_to.get("text", "")
+
+        if not raw_arg:
+            await send_tg_message(http, chat_id, "**Account Plan Checker Mode**\nPlease paste `email|pass|2fa` right after `/check` or reply to a message containing credentials with `/check`.")
+            return
+
+        lines = raw_arg.splitlines()
+        for line in lines:
+            line_str = line.strip()
+            if "@" in line_str and ("|" in line_str or ":" in line_str) and not line_str.startswith("eyJ"):
+                parts_cred = re.split(r'[|:]', line_str)
+                email = parts_cred[0].strip()
+                await send_tg_message(http, chat_id, f"**Checking Account Plan** (`{email}`)... Please wait...")
+
+                token, plan, status_msg = await login_account_credential(line_str)
+                if token:
+                    msg = (
+                        f"**Account Check Result**\n\n"
+                        f"**Email**: `{email}`\n"
+                        f"**Plan**: **{plan.upper()}**"
+                    )
+                    await send_tg_message(http, chat_id, msg)
+                else:
+                    await send_tg_message(http, chat_id, f"**Check Failed**: {status_msg}")
         return
 
     if cmd in ["/addworker", "/adduser"]:
