@@ -372,7 +372,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
                 except Exception:
                     res = {}
 
-                if resp.status != 200 or not res.get("ok"):
+                if resp.status not in (200, 201, 202) or not res.get("ok"):
                     err_msg = res.get("error") or res.get("detail") or f"HTTP {resp.status}: {resp_text[:100]}"
                     await send_tg_message(http, chat_id, f"**Job Submission Failed for Token #{idx}**\nReason: `{err_msg}`")
                     continue
