@@ -70,7 +70,7 @@ async def login_account_credential(cred_str):
 
     logger.info(f"[Pure-HTTP Auth] Logging in {email} via Proxy ({PROXY_URL.split('@')[-1]})...")
     try:
-        async with AsyncSession(impersonate="chrome124", proxy=PROXY_URL if PROXY_URL else None, timeout=25) as session:
+        async with AsyncSession(impersonate="safari15_5", proxy=PROXY_URL if PROXY_URL else None, timeout=25) as session:
             session_entry = await login_pure_request(email, password, totp_secret, session, logger)
             if session_entry and session_entry.access_token:
                 # Detect subscription plan (Plus vs Free)

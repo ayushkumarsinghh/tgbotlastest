@@ -17,7 +17,7 @@ from app.models import AccountRecord, SessionEntry
 from app.sentinel import get_sentinel_token
 from app.session_cache import SessionCache
 
-IMPERSONATE = "chrome124"
+IMPERSONATE = "safari15_5"
 
 class LoginError(Exception):
     def __init__(self, code: str = "", reason: str | None = None, message: str = "") -> None:
