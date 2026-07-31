@@ -27,8 +27,86 @@ AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Username whitelist (lowercase
 
 STOCK_FILE = "token_stock.txt"
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+from curl_cffi.requests import AsyncSession
+
+# Add upi-vippro-tool-api to sys.path
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "upi-vippro-tool-api"))
+try:
+    from app.login_service import login_pure_request, LoginError
+except Exception as err:
+    logger.warning(f"Could not import login_service: {err}")
+
+async def login_account_credential(cred_str):
+    cred_str = cred_str.strip()
+    if not cred_str:
+        return None, "Empty string"
+
+    parts = re.split(r'[|:]', cred_str)
+    if len(parts) < 2:
+        return None, "Invalid format. Use email|pass|2fa"
+
+    email = parts[0].strip()
+    password = parts[1].strip()
+    totp_secret = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else None
+
+    logger.info(f"[Pure-HTTP Auth] Logging in {email}...")
+    try:
+        async with AsyncSession(impersonate="chrome136", timeout=25) as session:
+            session_entry = await login_pure_request(email, password, totp_secret, session, logger)
+            if session_entry and session_entry.access_token:
+                logger.info(f"[Pure-HTTP Auth] ✅ Access Token generated for {email}!")
+                return session_entry.access_token, f"✅ Logged in: `{email}`"
+    except Exception as le:
+        logger.error(f"[Pure-HTTP Auth] ❌ Login error for {email}: {le}")
+        return None, f"❌ Login failed for `{email}` ({str(le)})"
+
+    return None, f"❌ Unknown login error for `{email}`"
+
+async def process_and_extract_credentials(text, http=None, chat_id=None):
+    if not text:
+        return []
+
+    tokens = []
+    lines = text.splitlines()
+
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+
+        # 1. Check if line is email|pass|2fa or email:pass:2fa format
+        if "@" in line_str and ("|" in line_str or ":" in line_str) and not line_str.startswith("eyJ"):
+            parts = re.split(r'[|:]', line_str)
+            if len(parts) >= 2:
+                email = parts[0].strip()
+                if chat_id and http:
+                    await send_tg_message(http, chat_id, f"🔑 **Authenticating Account** (`{email}`)... Please wait...")
+
+                token, status_msg = await login_account_credential(line_str)
+                if token:
+                    tokens.append(token)
+                    if chat_id and http:
+                        await send_tg_message(http, chat_id, f"✅ `{email}`: **Logged In & Access Token Generated!**")
+                        # If CDK key is set, automatically trigger Pupux Kakao Pay QR Code generation!
+                        if ACTIVE_CDK:
+                            asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
+                else:
+                    if chat_id and http:
+                        await send_tg_message(http, chat_id, status_msg)
+                continue
+
+        # 2. Extract raw JWT tokens starting with eyJ
+        jwt_matches = re.findall(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', line_str)
+        for jm in jwt_matches:
+            if len(jm) > 50 and jm not in tokens:
+                tokens.append(jm)
+
+        # 3. Direct tokens without eyJ prefix
+        if len(line_str) > 50 and line_str not in tokens and not line_str.startswith("eyJ"):
+            if not ("@" in line_str and ("|" in line_str or ":" in line_str)):
+                tokens.append(line_str)
+
+    return tokens
 
 def extract_access_tokens_from_text(text):
     tokens = []
@@ -383,13 +461,13 @@ async def handle_update(http, update):
         if not raw_arg and reply_to:
             raw_arg = reply_to.get("text", "")
 
-        tokens = [line.strip() for line in raw_arg.splitlines() if line.strip().startswith("eyJ") or len(line.strip()) > 50]
+        tokens = await process_and_extract_credentials(raw_arg, http=http, chat_id=chat_id)
         if not tokens:
-            await send_tg_message(http, chat_id, "📥 **Token Input Mode**\nPlease paste Access Tokens right after `/tokeninput` or reply to a token message with `/tokeninput`.")
+            await send_tg_message(http, chat_id, "📥 **Token / Account Input Mode**\nPlease paste Access Tokens or `email|pass|2fa` credentials right after `/tokeninput` or reply to a message with `/tokeninput`.")
             return
 
         added, total_stock = add_to_stock(tokens, http=http)
-        await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` new Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
+        await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
         return
 
     # Admin-only commands below (setcdk, usetoken, setlimit, addworker, removeworker, run)
@@ -444,9 +522,8 @@ async def handle_update(http, update):
         await execute_extraction_batch(http, chat_id, selected_tokens)
         return
 
-    # Direct token paste from anyone (saves to stock automatically without requiring CDK)
-    raw_lines = text.splitlines()
-    tokens = [line.strip() for line in raw_lines if line.strip().startswith("eyJ") or len(line.strip()) > 50]
+    # Direct token or email|pass|2fa credential paste
+    tokens = await process_and_extract_credentials(text, http=http, chat_id=chat_id)
     if tokens:
         added, total_stock = add_to_stock(tokens, http=http)
         await send_tg_message(
@@ -454,6 +531,70 @@ async def handle_update(http, update):
             f"✅ **{added} Access Token(s) Received & Saved to Stock!**\n"
             f"📦 Total Unused Stock: `{total_stock}` token(s)."
         )
+
+async def maintain_discord_presence(http):
+    if not DISCORD_TOKEN:
+        return
+        
+    raw_token = DISCORD_TOKEN.strip()
+    clean_token = raw_token[4:].strip() if raw_token.startswith("Bot ") else raw_token
+
+    gateway_url = "wss://gateway.discord.gg/?v=9&encoding=json"
+    logger.info("[Discord Presence] Starting Gateway connection to turn Bot Online 🟢...")
+
+    while True:
+        try:
+            async with http.ws_connect(gateway_url) as ws:
+                logger.info("🟢 [Discord Presence] Connected to Discord Gateway! Bot is now ONLINE.")
+                
+                # Identify Payload
+                identify_payload = {
+                    "op": 2,
+                    "d": {
+                        "token": clean_token,
+                        "intents": 512,
+                        "properties": {
+                            "$os": "linux",
+                            "$browser": "python",
+                            "$device": "python"
+                        },
+                        "presence": {
+                            "status": "online",
+                            "afk": False,
+                            "activities": [{
+                                "name": "Session Auto Sync",
+                                "type": 0
+                            }]
+                        }
+                    }
+                }
+                await ws.send_json(identify_payload)
+
+                # Keep heartbeat loop
+                while not ws.closed:
+                    msg = await ws.receive()
+                    if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        break
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        data = json.loads(msg.data)
+                        op = data.get("op")
+                        if op == 10:  # Hello
+                            interval_ms = data.get("d", {}).get("heartbeat_interval", 41250)
+                            asyncio.create_task(send_gateway_heartbeats(ws, interval_ms / 1000.0))
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[Discord Presence] Gateway reconnecting: {e}")
+            await asyncio.sleep(5)
+
+async def send_gateway_heartbeats(ws, interval_sec):
+    try:
+        while not ws.closed:
+            await asyncio.sleep(interval_sec)
+            if not ws.closed:
+                await ws.send_json({"op": 1, "d": None})
+    except Exception:
+        pass
 
 async def poll_discord_channel(http):
     global LAST_DISCORD_MSG_ID
@@ -465,7 +606,7 @@ async def poll_discord_channel(http):
     logger.info(f"[Discord Sync] Starting background listener for Discord Input Channel {DISCORD_INPUT_CHANNEL_ID} (2s interval)...")
     url = f"https://discord.com/api/v9/channels/{DISCORD_INPUT_CHANNEL_ID}/messages?limit=10"
     
-    # Baseline fetch
+    # Baseline fetch & extract recent messages
     try:
         async with http.get(url, headers=headers, timeout=10) as resp:
             if resp.status == 200:
@@ -473,6 +614,30 @@ async def poll_discord_channel(http):
                 if msgs and isinstance(msgs, list):
                     LAST_DISCORD_MSG_ID = msgs[0].get("id")
                     logger.info(f"[Discord Sync] Baseline Message ID: {LAST_DISCORD_MSG_ID}")
+                    
+                    # Process initial recent messages
+                    msgs.sort(key=lambda m: int(m.get("id", 0)))
+                    for msg in msgs:
+                        content = msg.get("content", "")
+                        author = msg.get("author", {}).get("username", "Unknown")
+                        attachments = msg.get("attachments", [])
+                        for att in attachments:
+                            att_url = att.get("url")
+                            filename = att.get("filename", "").lower()
+                            if att_url and (filename.endswith(".txt") or filename.endswith(".json") or "text" in att.get("content_type", "")):
+                                try:
+                                    async with http.get(att_url, timeout=10) as att_resp:
+                                        if att_resp.status == 200:
+                                            att_text = await att_resp.text()
+                                            content += f"\n{att_text}"
+                                except Exception as att_err:
+                                    logger.error(f"[Discord Sync] Attachment fetch error: {att_err}")
+
+                        extracted = await process_and_extract_credentials(content, http=http)
+                        if extracted:
+                            added, total_stock = add_to_stock(extracted, http=http)
+                            logger.info(f"[Discord Sync] ✅ Extracted {added} token(s) from Discord (@{author}). Total stock: {total_stock}")
+
     except Exception as e:
         logger.error(f"[Discord Sync] Initial fetch error: {e}")
 
@@ -508,7 +673,7 @@ async def poll_discord_channel(http):
                                     except Exception as att_err:
                                         logger.error(f"[Discord Sync] Attachment fetch error: {att_err}")
 
-                            extracted = extract_access_tokens_from_text(content)
+                            extracted = await process_and_extract_credentials(content, http=http)
                             if extracted:
                                 added, total_stock = add_to_stock(extracted, http=http)
                                 logger.info(f"[Discord Sync] ✅ Extracted {added} token(s) from Discord (@{author}). Total stock: {total_stock}")
@@ -536,8 +701,8 @@ async def main():
             bot_info = me_json.get("result", {})
             print(f"✅ Telegram Bot Connected Successfully: @{bot_info.get('username')} ({bot_info.get('first_name')})")
 
-        # Restore Token Stock from Discord DB Channel on startup
-        await restore_stock_from_discord_db(http)
+        # Start Discord Gateway Presence Task (turns bot Online 🟢)
+        asyncio.create_task(maintain_discord_presence(http))
 
         # Start Discord Channel Listener Task
         asyncio.create_task(poll_discord_channel(http))
