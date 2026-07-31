@@ -13,9 +13,9 @@ TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PUPUX_API_BASE = "https://ai.pupux.xyz/api/paylinks"
 
 # Discord Channels Config (Set DISCORD_TOKEN in Railway Env Variables)
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-DISCORD_INPUT_CHANNEL_ID = os.getenv("DISCORD_INPUT_CHANNEL_ID", "1532592499678384248")
-DISCORD_DB_CHANNEL_ID = os.getenv("DISCORD_DB_CHANNEL_ID", "1532594541742395425")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
+DISCORD_INPUT_CHANNEL_ID = os.getenv("DISCORD_INPUT_CHANNEL_ID", "1532592499678384248").strip()
+DISCORD_DB_CHANNEL_ID = os.getenv("DISCORD_DB_CHANNEL_ID", "1532594541742395425").strip()
 LAST_DISCORD_MSG_ID = None
 LAST_TG_CHAT_ID = None
 
@@ -80,11 +80,19 @@ def save_stock(tokens):
         for t in tokens:
             f.write(f"{t}\n")
 
+def get_discord_headers():
+    tok = DISCORD_TOKEN.strip()
+    if not tok:
+        return {}
+    if not tok.startswith("Bot "):
+        tok = f"Bot {tok}"
+    return {"Authorization": tok}
+
 async def push_stock_to_discord_db(http):
-    if not DISCORD_TOKEN or not DISCORD_DB_CHANNEL_ID:
+    headers = get_discord_headers()
+    if not headers or not DISCORD_DB_CHANNEL_ID:
         return
     url = f"https://discord.com/api/v9/channels/{DISCORD_DB_CHANNEL_ID}/messages"
-    headers = {"Authorization": DISCORD_TOKEN}
     tokens = load_stock()
     
     content_payload = f"📦 **Token Stock DB Backup** — `{len(tokens)}` unused token(s) in pool."
@@ -108,10 +116,10 @@ async def push_stock_to_discord_db(http):
         logger.error(f"[Discord DB] Exception uploading stock to Discord DB: {e}")
 
 async def restore_stock_from_discord_db(http):
-    if not DISCORD_TOKEN or not DISCORD_DB_CHANNEL_ID:
+    headers = get_discord_headers()
+    if not headers or not DISCORD_DB_CHANNEL_ID:
         return
     url = f"https://discord.com/api/v9/channels/{DISCORD_DB_CHANNEL_ID}/messages?limit=10"
-    headers = {"Authorization": DISCORD_TOKEN}
     try:
         async with http.get(url, headers=headers, timeout=10) as resp:
             if resp.status == 200:
@@ -449,12 +457,12 @@ async def handle_update(http, update):
 
 async def poll_discord_channel(http):
     global LAST_DISCORD_MSG_ID
-    if not DISCORD_TOKEN or not DISCORD_INPUT_CHANNEL_ID:
+    headers = get_discord_headers()
+    if not headers or not DISCORD_INPUT_CHANNEL_ID:
         logger.info("[Discord Sync] DISCORD_TOKEN or DISCORD_INPUT_CHANNEL_ID not set. Polling disabled.")
         return
 
     logger.info(f"[Discord Sync] Starting background listener for Discord Input Channel {DISCORD_INPUT_CHANNEL_ID} (2s interval)...")
-    headers = {"Authorization": DISCORD_TOKEN}
     url = f"https://discord.com/api/v9/channels/{DISCORD_INPUT_CHANNEL_ID}/messages?limit=10"
     
     # Baseline fetch
