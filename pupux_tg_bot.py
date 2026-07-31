@@ -40,11 +40,11 @@ except Exception as err:
 async def login_account_credential(cred_str):
     cred_str = cred_str.strip()
     if not cred_str:
-        return None, "Empty string"
+        return None, "free", "Empty string"
 
     parts = re.split(r'[|:]', cred_str)
     if len(parts) < 2:
-        return None, "Invalid format. Use email|pass|2fa"
+        return None, "free", "Invalid format. Use email|pass|2fa"
 
     email = parts[0].strip()
     password = parts[1].strip()
@@ -52,16 +52,35 @@ async def login_account_credential(cred_str):
 
     logger.info(f"[Pure-HTTP Auth] Logging in {email}...")
     try:
-        async with AsyncSession(impersonate="chrome136", timeout=25) as session:
+        async with AsyncSession(impersonate="chrome124", timeout=25) as session:
             session_entry = await login_pure_request(email, password, totp_secret, session, logger)
             if session_entry and session_entry.access_token:
-                logger.info(f"[Pure-HTTP Auth] Access Token generated for {email}!")
-                return session_entry.access_token, f"Logged in: `{email}`"
+                # Detect subscription plan (Plus vs Free)
+                plan = "free"
+                try:
+                    r = await session.get(
+                        "https://chatgpt.com/api/auth/session",
+                        headers={"Accept": "application/json", "Referer": "https://chatgpt.com/"}
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        p = (data.get("subscription_plan") or (data.get("account") or {}).get("planType") or "").lower()
+                        if p in ("chatgptplusplan", "plus") or "plus" in p:
+                            plan = "plus"
+                        elif "team" in p:
+                            plan = "team"
+                        elif "pro" in p:
+                            plan = "pro"
+                except Exception as plan_err:
+                    logger.warning(f"Plan detection failed for {email}: {plan_err}")
+
+                logger.info(f"[Pure-HTTP Auth] Access Token generated for {email} (Plan: {plan})!")
+                return session_entry.access_token, plan, f"Logged in: `{email}` ({plan.upper()})"
     except Exception as le:
         logger.error(f"[Pure-HTTP Auth] Login error for {email}: {le}")
-        return None, f"Login failed for `{email}` ({str(le)})"
+        return None, "free", f"Login failed for `{email}` ({str(le)})"
 
-    return None, f"Unknown login error for `{email}`"
+    return None, "free", f"Unknown login error for `{email}`"
 
 async def process_and_extract_credentials(text, http=None, chat_id=None):
     if not text:
