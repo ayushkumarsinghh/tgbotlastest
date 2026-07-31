@@ -23,7 +23,7 @@ LAST_TG_CHAT_ID = None
 ACTIVE_CDK = os.getenv("PUPUX_CDK", "")
 TOKEN_LIMIT = int(os.getenv("PUPUX_TOKEN_LIMIT", "10"))
 PAYMENT_METHOD = "kakao"  # Hardcoded to Kakao pay
-AUTHORIZED_WORKERS = {"sleepu69"}  # Initial admin (lowercase)
+AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Initial authorized admins (lowercase)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -442,38 +442,13 @@ async def handle_update(http, update):
     if cmd == "/status":
         cdk_display = f"`{ACTIVE_CDK}`" if ACTIVE_CDK else "*Not Set* (Use `/setcdk <KEY>`)"
         workers_str = ", ".join([f"@{w}" for w in AUTHORIZED_WORKERS]) if AUTHORIZED_WORKERS else "None"
-        stock_count = len(load_stock())
         msg = (
             "**Bot Configuration Status**\n\n"
             f"**Payment Method**: `Kakao Pay` (Hardcoded)\n"
             f"**Active CDK Key**: {cdk_display}\n"
-            f"**Max Tokens Limit**: `{TOKEN_LIMIT}`\n"
-            f"**Stored Token Stock**: `{stock_count}` unused tokens\n"
             f"**Authorized Users**: {workers_str}\n"
         )
         await send_tg_message(http, chat_id, msg)
-        return
-
-    if cmd == "/statustoken":
-        stock_count = len(load_stock())
-        await send_tg_message(http, chat_id, f"**Current Token Stock**: `{stock_count}` unused Access Token(s) in pool.")
-        return
-
-    if cmd == "/tokeninput":
-        parts = text.split(maxsplit=1)
-        raw_arg = parts[1] if len(parts) > 1 else ""
-        
-        reply_to = message.get("reply_to_message")
-        if not raw_arg and reply_to:
-            raw_arg = reply_to.get("text", "")
-
-        tokens = await process_and_extract_credentials(raw_arg, http=http, chat_id=chat_id)
-        if not tokens:
-            await send_tg_message(http, chat_id, "**Token / Account Input Mode**\nPlease paste Access Tokens or `email|pass|2fa` credentials right after `/tokeninput` or reply to a message with `/tokeninput`.")
-            return
-
-        added, total_stock = add_to_stock(tokens, http=http)
-        await send_tg_message(http, chat_id, f"**Token Stock Updated!**\nAdded: `{added}` Access Token(s)\nTotal Unused Stock: `{total_stock}` token(s) in pool.")
         return
 
     if cmd == "/setcdk":
@@ -483,15 +458,6 @@ async def handle_update(http, update):
             return
         ACTIVE_CDK = parts[1].strip()
         await send_tg_message(http, chat_id, f"**CDK Key Updated Successfully!**\nNew CDK: `{ACTIVE_CDK}`")
-        return
-
-    if cmd in ["/usetoken", "/setlimit"]:
-        parts = text.split(maxsplit=1)
-        if len(parts) < 2 or not parts[1].strip().isdigit():
-            await send_tg_message(http, chat_id, "**Usage**: `/usetoken <NUMBER>` (e.g. `/usetoken 10`)")
-            return
-        TOKEN_LIMIT = int(parts[1].strip())
-        await send_tg_message(http, chat_id, f"**Token Limit Updated!**\nMax tokens per run: `{TOKEN_LIMIT}`")
         return
 
     if cmd in ["/addworker", "/adduser"]:
