@@ -12,10 +12,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8711939395:AAFqMmnEZaVhJ2kk04aLft2llUP8iDOU8
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PUPUX_API_BASE = "https://ai.pupux.xyz/api/paylinks"
 
-# Discord Channel Auto-Sync Config (Set DISCORD_TOKEN in Railway Env Variables)
+# Discord Channels Config (Set DISCORD_TOKEN in Railway Env Variables)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID", "1532592499678384248")
+DISCORD_INPUT_CHANNEL_ID = os.getenv("DISCORD_INPUT_CHANNEL_ID", "1532592499678384248")
+DISCORD_DB_CHANNEL_ID = os.getenv("DISCORD_DB_CHANNEL_ID", "1532594541742395425")
 LAST_DISCORD_MSG_ID = None
+LAST_TG_CHAT_ID = None
 
 # Default runtime state
 ACTIVE_CDK = os.getenv("PUPUX_CDK", "")
@@ -33,30 +35,38 @@ def extract_access_tokens_from_text(text):
     if not text:
         return tokens
         
-    # 1. Try parsing JSON directly to find "accessToken"
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            acc_tok = data.get("accessToken")
-            if acc_tok and isinstance(acc_tok, str) and len(acc_tok) > 50:
-                tokens.append(acc_tok.strip())
-    except Exception:
-        pass
-        
-    # 2. Search regex for "accessToken": "..." or raw JWT eyJ...
-    if not tokens:
-        match = re.search(r'"accessToken"\s*:\s*"([^"]+)"', text)
+    lines = text.splitlines()
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+
+        # 1. Try parsing JSON directly to find "accessToken"
+        try:
+            data = json.loads(line_str)
+            if isinstance(data, dict):
+                acc_tok = data.get("accessToken")
+                if acc_tok and isinstance(acc_tok, str) and len(acc_tok) > 50:
+                    if acc_tok.strip() not in tokens:
+                        tokens.append(acc_tok.strip())
+                    continue
+        except Exception:
+            pass
+            
+        # 2. Search regex for "accessToken": "..." in line
+        match = re.search(r'"accessToken"\s*:\s*"([^"]+)"', line_str)
         if match:
             tok = match.group(1).strip()
-            if len(tok) > 50:
+            if len(tok) > 50 and tok not in tokens:
                 tokens.append(tok)
+                continue
                 
-    if not tokens:
-        jwt_matches = re.findall(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', text)
+        # 3. Search regex for raw JWT tokens starting with eyJ
+        jwt_matches = re.findall(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', line_str)
         for jm in jwt_matches:
             if len(jm) > 50 and jm not in tokens:
                 tokens.append(jm)
-                
+
     return tokens
 
 def load_stock():
@@ -70,7 +80,60 @@ def save_stock(tokens):
         for t in tokens:
             f.write(f"{t}\n")
 
-def add_to_stock(new_tokens):
+async def push_stock_to_discord_db(http):
+    if not DISCORD_TOKEN or not DISCORD_DB_CHANNEL_ID:
+        return
+    url = f"https://discord.com/api/v9/channels/{DISCORD_DB_CHANNEL_ID}/messages"
+    headers = {"Authorization": DISCORD_TOKEN}
+    tokens = load_stock()
+    
+    content_payload = f"📦 **Token Stock DB Backup** — `{len(tokens)}` unused token(s) in pool."
+    
+    if not os.path.exists(STOCK_FILE):
+        return
+
+    try:
+        data = aiohttp.FormData()
+        data.add_field("payload_json", json.dumps({"content": content_payload}))
+        with open(STOCK_FILE, "rb") as f:
+            data.add_field("file", f, filename="token_stock.txt", content_type="text/plain")
+            
+        async with http.post(url, headers=headers, data=data, timeout=15) as resp:
+            if resp.status == 200:
+                logger.info(f"[Discord DB] Backed up {len(tokens)} token(s) to Discord DB Channel ({DISCORD_DB_CHANNEL_ID}).")
+            else:
+                resp_text = await resp.text()
+                logger.error(f"[Discord DB] Failed to backup stock: {resp.status} - {resp_text}")
+    except Exception as e:
+        logger.error(f"[Discord DB] Exception uploading stock to Discord DB: {e}")
+
+async def restore_stock_from_discord_db(http):
+    if not DISCORD_TOKEN or not DISCORD_DB_CHANNEL_ID:
+        return
+    url = f"https://discord.com/api/v9/channels/{DISCORD_DB_CHANNEL_ID}/messages?limit=10"
+    headers = {"Authorization": DISCORD_TOKEN}
+    try:
+        async with http.get(url, headers=headers, timeout=10) as resp:
+            if resp.status == 200:
+                msgs = await resp.json()
+                if msgs and isinstance(msgs, list):
+                    for msg in msgs:
+                        attachments = msg.get("attachments", [])
+                        for att in attachments:
+                            if att.get("filename") == "token_stock.txt" or att.get("url", "").endswith(".txt"):
+                                att_url = att.get("url")
+                                async with http.get(att_url, timeout=10) as att_resp:
+                                    if att_resp.status == 200:
+                                        att_text = await att_resp.text()
+                                        restored_tokens = extract_access_tokens_from_text(att_text)
+                                        if restored_tokens:
+                                            save_stock(restored_tokens)
+                                            logger.info(f"[Discord DB] Restored {len(restored_tokens)} token(s) from Discord DB Channel!")
+                                            return
+    except Exception as e:
+        logger.error(f"[Discord DB] Error restoring stock from Discord DB: {e}")
+
+def add_to_stock(new_tokens, http=None):
     existing = load_stock()
     existing_set = set(existing)
     added = 0
@@ -80,13 +143,17 @@ def add_to_stock(new_tokens):
             existing_set.add(t)
             added += 1
     save_stock(existing)
+    if added > 0 and http:
+        asyncio.create_task(push_stock_to_discord_db(http))
     return added, len(existing)
 
-def pop_from_stock(count):
+def pop_from_stock(count, http=None):
     existing = load_stock()
     selected = existing[:count]
     remaining = existing[count:]
     save_stock(remaining)
+    if http:
+        asyncio.create_task(push_stock_to_discord_db(http))
     return selected, len(remaining)
 
 def is_authorized(username):
@@ -245,13 +312,15 @@ async def execute_extraction_batch(http, chat_id, tokens):
         await send_tg_message(http, chat_id, final_text)
 
 async def handle_update(http, update):
-    global ACTIVE_CDK, TOKEN_LIMIT, AUTHORIZED_WORKERS
+    global ACTIVE_CDK, TOKEN_LIMIT, AUTHORIZED_WORKERS, LAST_TG_CHAT_ID
 
     message = update.get("message") or update.get("edited_message")
     if not message:
         return
 
     chat_id = message.get("chat", {}).get("id")
+    if chat_id:
+        LAST_TG_CHAT_ID = chat_id
     text = message.get("text", "").strip()
     from_user = message.get("from", {})
     username = from_user.get("username", "")
@@ -311,7 +380,7 @@ async def handle_update(http, update):
             await send_tg_message(http, chat_id, "📥 **Token Input Mode**\nPlease paste Access Tokens right after `/tokeninput` or reply to a token message with `/tokeninput`.")
             return
 
-        added, total_stock = add_to_stock(tokens)
+        added, total_stock = add_to_stock(tokens, http=http)
         await send_tg_message(http, chat_id, f"✅ **Token Stock Updated!**\n➕ Added: `{added}` new Access Token(s)\n📦 Total Unused Stock: `{total_stock}` token(s) in pool.")
         return
 
@@ -360,7 +429,7 @@ async def handle_update(http, update):
         return
 
     if cmd == "/run":
-        selected_tokens, remaining_stock_count = pop_from_stock(TOKEN_LIMIT)
+        selected_tokens, remaining_stock_count = pop_from_stock(TOKEN_LIMIT, http=http)
         if not selected_tokens:
             await send_tg_message(http, chat_id, "❌ **Token Stock is Empty!** Use `/tokeninput` to add tokens first.")
             return
@@ -371,7 +440,7 @@ async def handle_update(http, update):
     raw_lines = text.splitlines()
     tokens = [line.strip() for line in raw_lines if line.strip().startswith("eyJ") or len(line.strip()) > 50]
     if tokens:
-        added, total_stock = add_to_stock(tokens)
+        added, total_stock = add_to_stock(tokens, http=http)
         await send_tg_message(
             http, chat_id, 
             f"✅ **{added} Access Token(s) Received & Saved to Stock!**\n"
@@ -380,13 +449,13 @@ async def handle_update(http, update):
 
 async def poll_discord_channel(http):
     global LAST_DISCORD_MSG_ID
-    if not DISCORD_TOKEN or not DISCORD_CHANNEL_ID:
-        logger.info("[Discord Sync] DISCORD_TOKEN or DISCORD_CHANNEL_ID not set. Polling disabled.")
+    if not DISCORD_TOKEN or not DISCORD_INPUT_CHANNEL_ID:
+        logger.info("[Discord Sync] DISCORD_TOKEN or DISCORD_INPUT_CHANNEL_ID not set. Polling disabled.")
         return
 
-    logger.info(f"[Discord Sync] Starting background listener for Discord Channel {DISCORD_CHANNEL_ID}...")
+    logger.info(f"[Discord Sync] Starting background listener for Discord Input Channel {DISCORD_INPUT_CHANNEL_ID} (2s interval)...")
     headers = {"Authorization": DISCORD_TOKEN}
-    url = f"https://discord.com/api/v9/channels/{DISCORD_CHANNEL_ID}/messages?limit=10"
+    url = f"https://discord.com/api/v9/channels/{DISCORD_INPUT_CHANNEL_ID}/messages?limit=10"
     
     # Baseline fetch
     try:
@@ -400,7 +469,7 @@ async def poll_discord_channel(http):
         logger.error(f"[Discord Sync] Initial fetch error: {e}")
 
     while True:
-        await asyncio.sleep(4)  # Poll every 4 seconds
+        await asyncio.sleep(2)  # Fast 2-second polling interval
         try:
             poll_url = url
             if LAST_DISCORD_MSG_ID:
@@ -417,22 +486,23 @@ async def poll_discord_channel(http):
                             content = msg.get("content", "")
                             author = msg.get("author", {}).get("username", "Unknown")
                             
-                            # Also check attachments
+                            # Also check text attachments (.txt, .json, etc.)
                             attachments = msg.get("attachments", [])
                             for att in attachments:
                                 att_url = att.get("url")
-                                if att_url and (att_url.endswith(".txt") or att_url.endswith(".json")):
+                                filename = att.get("filename", "").lower()
+                                if att_url and (filename.endswith(".txt") or filename.endswith(".json") or "text" in att.get("content_type", "")):
                                     try:
                                         async with http.get(att_url, timeout=10) as att_resp:
                                             if att_resp.status == 200:
                                                 att_text = await att_resp.text()
                                                 content += f"\n{att_text}"
-                                    except Exception:
-                                        pass
+                                    except Exception as att_err:
+                                        logger.error(f"[Discord Sync] Attachment fetch error: {att_err}")
 
                             extracted = extract_access_tokens_from_text(content)
                             if extracted:
-                                added, total_stock = add_to_stock(extracted)
+                                added, total_stock = add_to_stock(extracted, http=http)
                                 logger.info(f"[Discord Sync] ✅ Extracted {added} token(s) from Discord (@{author}). Total stock: {total_stock}")
 
                             LAST_DISCORD_MSG_ID = msg_id
@@ -443,7 +513,7 @@ async def poll_discord_channel(http):
             break
         except Exception as err:
             logger.error(f"[Discord Sync] Error polling Discord: {err}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
 
 async def main():
     print(f"[System] Starting Kakao Pay Telegram Bot (Direct Telegram API)...")
@@ -457,6 +527,9 @@ async def main():
                 return
             bot_info = me_json.get("result", {})
             print(f"✅ Telegram Bot Connected Successfully: @{bot_info.get('username')} ({bot_info.get('first_name')})")
+
+        # Restore Token Stock from Discord DB Channel on startup
+        await restore_stock_from_discord_db(http)
 
         # Start Discord Channel Listener Task
         asyncio.create_task(poll_discord_channel(http))
