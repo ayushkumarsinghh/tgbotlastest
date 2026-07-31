@@ -25,7 +25,8 @@ TOKEN_LIMIT = int(os.getenv("PUPUX_TOKEN_LIMIT", "10"))
 PAYMENT_METHOD = "kakao"  # Hardcoded to Kakao pay
 AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Username whitelist (lowercase)
 
-STOCK_FILE = "token_stock.txt"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 from curl_cffi.requests import AsyncSession
 

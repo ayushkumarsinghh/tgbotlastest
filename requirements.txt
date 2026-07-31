@@ -5,3 +5,4 @@ telethon==1.34.0
 aiohttp==3.9.3
 curl_cffi>=0.7
 pyotp>=2.9
+pydantic>=2.6
