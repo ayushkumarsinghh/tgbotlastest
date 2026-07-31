@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plus QR Automation</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233d5aef'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'%3E%3Crect x='7' y='7' width='7' height='7' rx='1.5'/%3E%3Crect x='18' y='7' width='7' height='7' rx='1.5'/%3E%3Crect x='7' y='18' width='7' height='7' rx='1.5'/%3E%3Cpath d='M18 18h3v3h-3zM25 18v3M18 25h3M25 25v.01'/%3E%3C/g%3E%3C/svg%3E"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            ink: { 50:'#f6f7f9', 100:'#eceef2', 200:'#d5dae3', 300:'#b0b8c9', 400:'#8590a8', 500:'#66728c', 600:'#515b73', 700:'#434b5e', 800:'#3a4150', 900:'#1c1f28', 950:'#111318' },
+            accent: { DEFAULT:'#3d5aef', soft:'#eef1ff', hover:'#2f48d4' },
+          },
+          boxShadow: {
+            panel: '0 0 0 1px rgba(28,31,40,.06), 0 1px 2px rgba(28,31,40,.04)',
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak]{display:none!important}
+    html,body{height:100%;overflow:hidden}
+    body{background:
+      radial-gradient(1100px 480px at 88% -12%, rgba(61,90,239,.08), transparent 60%),
+      radial-gradient(800px 420px at -8% 112%, rgba(61,90,239,.06), transparent 55%),
+      radial-gradient(rgba(28,31,40,.06) 1px, transparent 1.2px) 0 0/22px 22px,
+      #eef0f5}
+    *{scrollbar-width:thin;scrollbar-color:#c5cad6 transparent}
+    *::-webkit-scrollbar{width:6px;height:6px}
+    *::-webkit-scrollbar-thumb{background:#c5cad6;border-radius:99px}
+    *::-webkit-scrollbar-thumb:hover{background:#adb4c4}
+    :where(button,a,input,select,textarea):focus-visible{outline:2px solid #3d5aef;outline-offset:1px}
+    .field{width:100%;border:1px solid #d5dae3;border-radius:8px;padding:.4rem .65rem;font-size:13px;background:#fff;color:#1c1f28;box-shadow:inset 0 1px 2px rgba(28,31,40,.04);transition:border-color .15s,box-shadow .15s}
+    .field:focus{outline:none;border-color:#3d5aef;box-shadow:inset 0 1px 2px rgba(28,31,40,.02),0 0 0 3px rgba(61,90,239,.14)}
+    .field-sm{padding:.3rem .5rem;font-size:12px;border-radius:6px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:8px;font-size:12.5px;font-weight:500;line-height:1;padding:.5rem .85rem;border:1px solid transparent;white-space:nowrap;user-select:none;transition:background .15s,color .15s,border-color .15s,box-shadow .15s,transform .1s,opacity .15s}
+    .btn:active:not(:disabled){transform:translateY(1px)}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    .btn-primary{background:linear-gradient(180deg,#4c66f5,#3d5aef);color:#fff;border-color:#3049c8;box-shadow:0 1px 2px rgba(61,90,239,.35),inset 0 1px 0 rgba(255,255,255,.16)}
+    .btn-primary:hover:not(:disabled){background:linear-gradient(180deg,#4159e8,#2f48d4);box-shadow:0 3px 10px rgba(61,90,239,.3),inset 0 1px 0 rgba(255,255,255,.14)}
+    .btn-secondary{background:linear-gradient(180deg,#fff,#f8f9fb);color:#434b5e;border-color:#d5dae3;box-shadow:0 1px 1px rgba(28,31,40,.05)}
+    .btn-secondary:hover:not(:disabled){background:#f6f7f9;border-color:#b0b8c9;color:#1c1f28}
+    .btn-ghost{background:transparent;color:#515b73}.btn-ghost:hover:not(:disabled){background:#e8eaf1;color:#1c1f28}
+    .btn-danger{background:#fff;color:#b42318;border-color:#fecdca;box-shadow:0 1px 1px rgba(180,35,24,.06)}.btn-danger:hover:not(:disabled){background:#fef3f2;border-color:#fda29b}
+    .btn-danger-solid{background:linear-gradient(180deg,#e04438,#d92d20);color:#fff;border-color:#b42318;box-shadow:0 1px 2px rgba(217,45,32,.35)}.btn-danger-solid:hover:not(:disabled){background:#b42318}
+    .btn-violet{background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;border-color:#6d28d9;box-shadow:0 1px 2px rgba(124,58,237,.35),inset 0 1px 0 rgba(255,255,255,.16)}.btn-violet:hover:not(:disabled){background:linear-gradient(180deg,#7c4ff0,#6d28d9);box-shadow:0 3px 10px rgba(124,58,237,.3)}
+    .btn-violet-soft{background:#f1eaff;color:#6d28d9;border-color:#d9c7ff}.btn-violet-soft:hover:not(:disabled){background:#e7dbff;border-color:#c4a9ff}
+    .btn-dark{background:rgba(255,255,255,.07);color:#d5dae3;border-color:rgba(255,255,255,.14)}
+    .btn-dark:hover:not(:disabled){background:rgba(255,255,255,.13);color:#fff;border-color:rgba(255,255,255,.22)}
+    .btn-icon{padding:.4rem;width:30px;height:30px;border-radius:7px}
+    .btn-xs{padding:.3rem .55rem;font-size:11.5px;border-radius:6px}
+    .chip{display:inline-flex;align-items:center;gap:.4rem;border-radius:6px;padding:.22rem .5rem;font-size:11px;font-weight:500;line-height:1.2;white-space:nowrap}
+    .chip::before{content:'';width:5px;height:5px;border-radius:99px;background:currentColor;opacity:.65;flex:none}
+    .chip-live::before{animation:blink 1.1s ease-in-out infinite}
+    @keyframes blink{0%,100%{opacity:.9}50%{opacity:.2}}
+    .tab{padding:.4rem .7rem;border-radius:7px;font-size:12px;font-weight:500;color:#66728c;transition:all .15s}
+    .tab:hover{background:#e8eaf1;color:#1c1f28}
+    .tab-on{background:#1c1f28;color:#fff;box-shadow:0 2px 6px rgba(28,31,40,.28)}
+    .tab-on:hover{background:#1c1f28;color:#fff}
+    .panel{background:#fff;border:1px solid #e4e7ee;border-radius:12px;box-shadow:0 0 0 1px rgba(28,31,40,.02)}
+    .row-action{opacity:.55;transition:opacity .12s}
+    tr:hover .row-action{opacity:1}
+    .toast-in{animation:tIn .22s cubic-bezier(.2,.9,.3,1.2)}
+    @keyframes tIn{from{transform:translateY(10px) scale(.97);opacity:0}to{transform:none;opacity:1}}
+    .fade-in{animation:fIn .15s ease}
+    @keyframes fIn{from{opacity:0}to{opacity:1}}
+    .pop-in{animation:pIn .18s cubic-bezier(.2,.9,.3,1.15)}
+    @keyframes pIn{from{transform:scale(.95) translateY(6px);opacity:0}to{transform:none;opacity:1}}
+    textarea.field{resize:none;line-height:1.45}
+    .table-wrap{overflow:auto}
+    table.jobs{border-collapse:separate;border-spacing:0;width:100%}
+    table.jobs th{position:sticky;top:0;z-index:1;background:linear-gradient(180deg,#eef0f5,#e6e9f0);border-bottom:1px solid #d5dae3;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#515b73;text-align:left;padding:.55rem .65rem}
+    table.jobs td{padding:.55rem .65rem;border-bottom:1px solid #f0f2f6;font-size:12.5px;vertical-align:middle}
+    table.jobs tr:last-child td{border-bottom:none}
+    table.jobs tbody tr{transition:background .12s,box-shadow .12s}
+    table.jobs tbody tr:hover{background:#f7f8fb;box-shadow:inset 2px 0 0 #3d5aef}
+    table.jobs tbody tr.is-selected{background:#eef1ff;box-shadow:inset 3px 0 0 #3d5aef}
+    table.jobs tbody tr.is-selected:hover{background:#e7ebff}
+    .check{width:14px;height:14px;accent-color:#3d5aef}
+    .label{display:block;font-size:11px;font-weight:500;color:#66728c;margin-bottom:.3rem}
+    .seg{display:inline-flex;background:#eceef2;border-radius:8px;padding:2px;gap:2px;border:1px solid #e0e3ea}
+    .seg button{padding:.3rem .65rem;border-radius:6px;font-size:11.5px;font-weight:500;color:#66728c;transition:all .12s}
+    .seg button.on{background:#fff;color:#1c1f28;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+    .seg-dark{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.1)}
+    .seg-dark button{color:#8590a8}
+    .seg-dark button:not(.on):hover{color:#d5dae3}
+    .seg-dark button.on{background:#3d5aef;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+  </style>
+</head>
+<body class="h-full text-ink-900 font-sans antialiased" x-data="app()" x-init="init()" x-cloak>
+
+  <!-- SVG sprite -->
+  <svg xmlns="http://www.w3.org/2000/svg" class="hidden" aria-hidden="true">
+    <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>
+    </symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5M9 8V2M15 8V2M6 8h12v4a6 6 0 0 1-12 0V8z"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-coin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.2a3 3 0 0 0-2.5-1.2c-1.4 0-2.5.9-2.5 2s1.1 2 2.5 2 2.5.9 2.5 2-1.1 2-2.5 2a3 3 0 0 1-2.5-1.2M12 6.5v11"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.7 5.1A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a18.4 18.4 0 0 1-2.2 3.2"/><path d="M6.7 6.7C3.9 8.6 2 12 2 12s3.5 7 10 7a10.3 10.3 0 0 0 5.3-1.5"/><path d="M14.1 14.1a3 3 0 0 1-4.2-4.2"/><path d="m3 3 18 18"/></symbol>
+  </svg>
+
+  <div class="h-full flex flex-col min-h-0">
+    <!-- Top bar -->
+    <header class="relative shrink-0 h-12 px-3 sm:px-4 flex items-center gap-3 bg-gradient-to-r from-ink-950 via-ink-900 to-ink-950 text-white z-20">
+      <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none"></div>
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-[#5b73f7] to-[#2f48d4] text-white flex items-center justify-center shrink-0 shadow-[0_2px_10px_rgba(61,90,239,.55)] ring-1 ring-white/20">
+          <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-qr"/></svg>
+        </div>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[13px] font-semibold tracking-tight truncate">Plus QR</div>
+          <div class="text-[10px] text-ink-400 font-medium tracking-wide uppercase hidden sm:block">Automation</div>
+        </div>
+      </div>
+
+      <div class="h-5 w-px bg-white/10 hidden sm:block"></div>
+
+      <div class="seg seg-dark hidden sm:inline-flex" title="Flow mode">
+        <button type="button" :class="(config.flow_mode||'auto')==='auto' && 'on'" @click="setFlow('auto')">Auto</button>
+        <button type="button" :class="config.flow_mode==='manual' && 'on'" @click="setFlow('manual')">Manual</button>
+      </div>
+
+      <div class="flex-1"></div>
+
+      <div class="flex items-center gap-1.5 text-[12px]" :class="sseOk ? 'text-emerald-400' : 'text-rose-400'">
+        <span class="relative flex h-2 w-2">
+          <span x-show="!sseOk" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-60"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2" :class="sseOk ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.9)]' : 'bg-rose-500'"></span>
+        </span>
+        <span class="font-medium hidden sm:inline" x-text="sseOk ? 'Realtime' : 'Reconnecting…'"></span>
+      </div>
+
+      <button type="button" @click="loadAccount()" :disabled="accountLoading"
+              class="group flex items-center gap-2 rounded-lg pl-2 pr-2.5 py-1 bg-white/8 ring-1 ring-white/15 hover:bg-white/14 transition disabled:opacity-60"
+              :title="account.ok ? ('User #'+(account.user_id??'?')+' · key '+(account.key_prefix||'?')+' · click to refresh') : 'Click to check credit'">
+        <svg class="w-4 h-4 shrink-0" :class="account.ok===false ? 'text-rose-400' : 'text-amber-300'" aria-hidden="true"><use href="#i-coin"/></svg>
+        <div class="leading-none text-left">
+          <div class="flex items-baseline gap-1">
+            <span class="text-[14px] font-bold tabular-nums text-white" x-text="account.balance ?? '—'"></span>
+            <span class="text-[10px] text-ink-400 font-medium">credit</span>
+          </div>
+          <div class="text-[9.5px] text-ink-400 font-medium tabular-nums leading-none mt-0.5"
+               x-text="account.reserved ? ('held '+account.reserved) : (account.ok===false ? 'key error' : '')"></div>
+        </div>
+        <svg class="w-3 h-3 text-ink-400 group-hover:text-white transition" :class="accountLoading && 'animate-spin'" aria-hidden="true"><use href="#i-refresh"/></svg>
+      </button>
+
+      <button type="button" class="btn btn-dark btn-xs" @click="showConfig = !showConfig" :aria-expanded="showConfig">
+        <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-settings"/></svg>
+        <span class="hidden sm:inline">Settings</span>
+      </button>
+    </header>
+
+    <!-- Workspace: top = input + jobs | bottom = results -->
+    <div class="flex-1 min-h-0 flex flex-col">
+      <div class="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[minmax(240px,30%)_minmax(0,1fr)] lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)_minmax(300px,340px)]">
+
+        <!-- LEFT: accounts -->
+        <aside class="min-h-0 flex flex-col border-r border-ink-200/80 bg-white order-2 md:order-1 max-h-[38vh] md:max-h-none">
+          <div class="px-3 pt-2.5 pb-1.5 shrink-0 flex items-center justify-between gap-2">
+            <h2 class="text-[12px] font-semibold text-ink-700">Accounts</h2>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-ink-400 font-mono tabular-nums" x-text="preview.valid + ' ok · ' + preview.invalid + ' err'"></span>
+              <button type="button" class="btn btn-ghost btn-xs" @click="confirmClearInput()" :disabled="!(rawText||'').trim()" title="Clear input">
+                Clear
+              </button>
+            </div>
+          </div>
+          <p class="px-3 text-[11px] text-ink-400 shrink-0 mb-1.5">
+            <span class="font-mono text-ink-500">email|pass|2fa</span> · one account per line
+          </p>
+          <div class="flex-1 min-h-0 px-3 pb-2">
+            <textarea
+              x-model="rawText"
+              @input="persistDraft($event.target.value)"
+              class="field h-full min-h-[100px] font-mono text-[12px] leading-relaxed"
+              placeholder="user@mail.com|Passw0rd!|JBSWY3DPEHPK3PXP"
+              spellcheck="false"></textarea>
+          </div>
+          <div class="p-3 space-y-2 shrink-0 border-t border-ink-100 bg-gradient-to-b from-ink-50/70 to-ink-100/60">
+            <label class="flex items-center gap-2 text-[12px] text-ink-600">
+              <input type="checkbox" class="check" x-model="skipCacheBatch"/> Skip cache for this batch
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" class="btn btn-primary" @click="submit('immediate')" :disabled="submitting">
+                <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-play"/></svg>
+                <span x-text="submitting ? 'Submitting…' : 'Run now'"></span>
+              </button>
+              <button type="button" class="btn btn-violet" @click="submit('hold')" :disabled="submitting">
+                <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-queue"/></svg>
+                Queue
+              </button>
+            </div>
+            <p x-show="submitMsg" class="text-[11px] text-ink-500" x-text="submitMsg"></p>
+          </div>
+        </aside>
+
+        <!-- RIGHT: jobs -->
+        <section class="min-h-0 flex flex-col bg-ink-50/50 order-1 md:order-2">
+          <div class="shrink-0 px-3 py-2 flex flex-wrap items-center gap-2 border-b border-ink-200/60 bg-white">
+            <div class="flex flex-wrap gap-0.5">
+              <template x-for="t in filterTabs" :key="t.id">
+                <button type="button" class="tab" :class="filter===t.id && 'tab-on'" @click="filter=t.id">
+                  <span x-text="t.label"></span>
+                  <span class="opacity-60 font-mono text-[10px] ml-0.5" x-text="tabCount(t.id)"></span>
+                </button>
+              </template>
+            </div>
+            <div class="relative ml-auto">
+              <svg class="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-ink-400" aria-hidden="true"><use href="#i-search"/></svg>
+              <input x-model="search" type="search" placeholder="Search email" class="field field-sm pl-7 w-36 sm:w-44"/>
+            </div>
+          </div>
+
+          <div class="shrink-0 px-3 py-1.5 flex flex-wrap gap-1.5 border-b border-ink-200/40 bg-white/80">
+            <button type="button" class="btn btn-secondary btn-xs" @click="confirmBulk('stop_all')">
+              <svg class="w-3 h-3" aria-hidden="true"><use href="#i-stop"/></svg> Stop all
+            </button>
+            <button type="button" class="btn btn-xs" :class="paused ? 'btn-primary' : 'btn-secondary'" @click="togglePause()" :title="paused ? 'Unpause — resume held jobs' : 'Pause — pending jobs will hold, running jobs keep going'">
+              <svg class="w-3 h-3" aria-hidden="true"><use :href="paused ? '#i-play' : '#i-pause'"/></svg>
+              <span x-text="paused ? 'Resume' : 'Pause'"></span>
+            </button>
+            <button type="button" class="btn btn-violet btn-xs" @click="bulk('start_all_held')" :disabled="paused">
+              <svg class="w-3 h-3" aria-hidden="true"><use href="#i-play"/></svg> Start held
+            </button>
+            <button type="button" class="btn btn-secondary btn-xs" @click="bulk('rerun_failed')">
+              <svg class="w-3 h-3" aria-hidden="true"><use href="#i-refresh"/></svg> Retry failed
+            </button>
+            <div class="flex-1 min-w-[8px]"></div>
+            <span x-show="paused" class="chip bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-300">Paused</span>
+            <button type="button" class="btn btn-danger btn-xs" @click="confirmBulk('clear_failed')">Clear failed</button>
+            <button type="button" class="btn btn-danger btn-xs" @click="confirmBulk('clear_done')">Clear done</button>
+            <button type="button" class="btn btn-danger btn-xs" @click="confirmBulk('clear_all')">Clear all</button>
+          </div>
+
+          <div class="flex-1 min-h-0 table-wrap">
+            <table class="jobs">
+              <thead>
+                <tr>
+                  <th class="w-auto">Email</th>
+                  <th class="w-px whitespace-nowrap">Status</th>
+                  <th class="w-px text-center">QR</th>
+                  <th class="w-px whitespace-nowrap">Time</th>
+                  <th class="w-px whitespace-nowrap">Attempts</th>
+                  <th class="w-px whitespace-nowrap text-right pr-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="j in filteredJobs()" :key="j.job_id">
+                  <tr @click="selectedJobId=j.job_id" class="cursor-pointer" :class="selectedJobId===j.job_id && 'is-selected'">
+                    <td>
+                      <div class="font-mono text-[12px] text-ink-800 truncate max-w-[min(280px,28vw)]" :title="j.email" x-text="j.email"></div>
+                      <div x-show="j.last_error && (j.state==='failed'||j.state==='retry_scheduled'||j.state==='stale')"
+                           class="text-[10.5px] text-rose-600/90 font-mono truncate max-w-[min(280px,28vw)] mt-0.5" :title="j.last_error" x-text="j.last_error"></div>
+                    </td>
+                    <td class="whitespace-nowrap"><span class="chip" :class="badgeClass(j.state)" x-text="j.state_label || j.state"></span></td>
+                    <td class="text-center">
+                      <button type="button" x-show="j.qr && j.qr.has_image" class="btn btn-ghost btn-icon row-action" @click.stop="openQr(j)" title="View QR">
+                        <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-qr"/></svg>
+                      </button>
+                      <span x-show="!(j.qr && j.qr.has_image)" class="text-ink-300">—</span>
+                    </td>
+                    <td class="font-mono text-[12px] text-ink-500 tabular-nums whitespace-nowrap" x-text="elapsed(j)"></td>
+                    <td class="font-mono text-[12px] text-ink-500 tabular-nums whitespace-nowrap text-center" x-text="(j.attempt_pipeline||0) + '/' + (config.pipeline_retry_limit||2)"></td>
+                    <td class="pr-3">
+                      <div class="flex flex-nowrap justify-end gap-1 row-action">
+                        <button type="button" x-show="j.state==='held'" class="btn btn-violet-soft btn-xs" @click="jobAction(j.job_id,'start')">
+                          <svg class="w-3 h-3" aria-hidden="true"><use href="#i-play"/></svg> Start
+                        </button>
+                        <button type="button" x-show="isActive(j.state)" class="btn btn-secondary btn-xs" @click="confirmJob('stop', j)">
+                          <svg class="w-3 h-3" aria-hidden="true"><use href="#i-stop"/></svg> Stop
+                        </button>
+                        <button type="button" x-show="isRerunnable(j.state)" class="btn btn-secondary btn-xs" @click="jobAction(j.job_id,'rerun')">
+                          <svg class="w-3 h-3" aria-hidden="true"><use href="#i-refresh"/></svg> Rerun
+                        </button>
+                        <button type="button" x-show="canCheck(j.state)" class="btn btn-secondary btn-xs" @click="jobAction(j.job_id,'check-plan')">
+                          <svg class="w-3 h-3" aria-hidden="true"><use href="#i-scan"/></svg> Plus
+                        </button>
+                        <button type="button" class="btn btn-danger btn-xs" @click="confirmJob('remove', j)" title="Delete">
+                          <svg class="w-3 h-3" aria-hidden="true"><use href="#i-trash"/></svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="filteredJobs().length===0" class="hover:!shadow-none hover:!bg-transparent">
+                  <td colspan="6" class="!py-10 text-center !border-0">
+                    <div class="inline-flex flex-col items-center gap-3 px-10 py-6 rounded-xl border border-dashed border-ink-300/70 bg-white/70">
+                      <div class="w-10 h-10 rounded-xl bg-accent-soft text-accent flex items-center justify-center">
+                        <svg class="w-5 h-5" aria-hidden="true"><use href="#i-queue"/></svg>
+                      </div>
+                      <div>
+                        <div class="text-[13px] font-semibold text-ink-700">No jobs yet</div>
+                        <div class="text-[12px] text-ink-400 mt-0.5">Paste the account list in the left panel then click «Run now»</div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- FAR RIGHT: job log -->
+        <aside class="min-h-0 hidden lg:flex flex-col border-l border-ink-200/80 bg-white order-3">
+          <div class="shrink-0 px-3 py-2 flex items-center gap-2 border-b border-ink-200/60 bg-gradient-to-r from-ink-50 to-transparent">
+            <svg class="w-4 h-4 text-accent shrink-0" aria-hidden="true"><use href="#i-queue"/></svg>
+            <div class="min-w-0 flex-1">
+              <div class="text-[12px] font-semibold text-ink-800 leading-tight">Job log</div>
+              <div class="text-[11px] text-ink-400 font-mono truncate" x-text="selectedJob() ? selectedJob().email : 'Select a job to view'"></div>
+            </div>
+            <span x-show="selectedJob()" class="chip shrink-0" :class="badgeClass(selectedJob()?.state)" x-text="selectedJob()?.state_label || selectedJob()?.state"></span>
+          </div>
+
+          <div class="flex-1 min-h-0 overflow-y-auto px-3 py-3" x-show="selectedJob()">
+            <ol class="relative border-l-2 border-ink-200 ml-1.5 space-y-3.5">
+              <template x-for="(t, i) in (selectedJob()?.timeline || [])" :key="i">
+                <li class="relative pl-4">
+                  <span class="absolute -left-[7px] top-1 w-3 h-3 rounded-full ring-2 ring-white" :class="logDotClass(t.state)"></span>
+                  <div class="flex items-baseline justify-between gap-2">
+                    <span class="text-[12px] font-medium text-ink-800" x-text="stateLabel(t.state)"></span>
+                    <span class="text-[10.5px] font-mono text-ink-400 tabular-nums shrink-0" x-text="logTime(t.at)"></span>
+                  </div>
+                  <div x-show="t.note" class="text-[11px] text-ink-500 mt-0.5 font-mono break-all" x-text="t.note"></div>
+                </li>
+              </template>
+            </ol>
+            <div x-show="selectedJob()?.last_error" class="mt-4 rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-2">
+              <div class="text-[10px] font-semibold uppercase tracking-wider text-rose-500">Last error</div>
+              <div class="text-[11.5px] font-mono text-rose-700 break-all mt-0.5" x-text="selectedJob()?.last_error"></div>
+            </div>
+            <div x-show="selectedJob()?.plan_result" class="mt-3 rounded-lg bg-sky-50 border border-sky-200 px-2.5 py-2">
+              <div class="text-[10px] font-semibold uppercase tracking-wider text-sky-500">Check Plus</div>
+              <div class="text-[11.5px] font-mono text-sky-800 mt-0.5" x-text="selectedJob()?.plan_result"></div>
+            </div>
+            <div class="mt-3 flex items-center gap-3 text-[11px] text-ink-400 font-mono">
+              <span x-text="'login ' + (selectedJob()?.attempt_login||0)"></span>
+              <span x-text="'pipeline ' + (selectedJob()?.attempt_pipeline||0)"></span>
+            </div>
+          </div>
+
+          <div class="flex-1 min-h-0 flex items-center justify-center px-6" x-show="!selectedJob()">
+            <div class="text-center text-ink-400">
+              <svg class="w-8 h-8 mx-auto opacity-30 mb-2" aria-hidden="true"><use href="#i-search"/></svg>
+              <div class="text-[12px]">Click a job row in the table<br/>to view the detailed log</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Bottom: results Done / Plus (secondary check) -->
+      <div class="shrink-0 h-[min(28vh,220px)] grid grid-cols-1 sm:grid-cols-2 border-t border-ink-200 bg-white">
+        <div class="min-h-0 flex flex-col border-b sm:border-b-0 sm:border-r border-ink-100">
+          <div class="px-3 py-1.5 flex items-center justify-between shrink-0 bg-gradient-to-r from-emerald-50 to-transparent border-b border-emerald-100/70">
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,.6)]"></span>
+              <span class="text-[12px] font-semibold text-emerald-800">Done</span>
+              <span class="text-[10px] text-emerald-700 font-mono tabular-nums bg-emerald-100/80 px-1.5 py-0.5 rounded" x-text="doneLines + ' lines'"></span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="copyResult('done')" title="Copy Done">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-copy"/></svg>
+            </button>
+          </div>
+          <pre class="flex-1 min-h-0 overflow-auto px-3 py-2 text-[11px] font-mono text-ink-700 leading-relaxed whitespace-pre-wrap break-all" x-text="doneContent || '—'"></pre>
+        </div>
+        <div class="min-h-0 flex flex-col">
+          <div class="px-3 py-1.5 flex items-center justify-between shrink-0 bg-gradient-to-r from-sky-50 to-transparent border-b border-sky-100/70">
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-sky-500 shadow-[0_0_5px_rgba(14,165,233,.6)]"></span>
+              <span class="text-[12px] font-semibold text-sky-800">Plus</span>
+              <span class="text-[10px] text-sky-700 font-mono tabular-nums bg-sky-100/80 px-1.5 py-0.5 rounded" x-text="plusLines + ' lines'"></span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="copyResult('plus')" title="Copy Plus">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-copy"/></svg>
+            </button>
+          </div>
+          <pre class="flex-1 min-h-0 overflow-auto px-3 py-2 text-[11px] font-mono text-ink-700 leading-relaxed whitespace-pre-wrap break-all" x-text="plusContent || '—'"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config modal -->
+  <div x-show="showConfig" x-transition.opacity class="fixed inset-0 z-40 flex items-start sm:items-center justify-center p-3 sm:p-6 bg-ink-950/55 backdrop-blur-[3px] overflow-y-auto" @keydown.escape.window="showConfig=false">
+    <div class="bg-white rounded-2xl shadow-2xl shadow-ink-950/30 w-full max-w-3xl border border-ink-200 my-auto pop-in flex flex-col max-h-[92vh]" @click.outside="showConfig=false">
+      <!-- Modal header -->
+      <div class="shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-ink-100 bg-gradient-to-r from-ink-50/80 to-transparent rounded-t-2xl">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-[#5b73f7] to-[#2f48d4] text-white flex items-center justify-center shrink-0 shadow-[0_2px_8px_rgba(61,90,239,.4)] ring-1 ring-white/20">
+          <svg class="w-4 h-4" aria-hidden="true"><use href="#i-settings"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <h3 class="text-[15px] font-semibold text-ink-900 leading-tight">Settings</h3>
+          <p class="text-[11.5px] text-ink-400">Connections, notifications and pipeline parameters</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon" @click="showConfig=false" aria-label="Close">
+          <svg class="w-4 h-4" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <!-- Modal body -->
+      <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Rust UPI Bot -->
+        <section class="rounded-xl border border-ink-200/70 bg-ink-50/40 p-4 space-y-3">
+          <div class="flex items-center gap-2 text-ink-700">
+            <svg class="w-4 h-4 text-accent" aria-hidden="true"><use href="#i-plug"/></svg>
+            <h4 class="text-[12px] font-semibold uppercase tracking-wider">Rust UPI Bot</h4>
+          </div>
+          <div>
+            <label class="label">Base URL</label>
+            <input class="field field-sm font-mono" x-model="configEdit.rust_bot_base_url" spellcheck="false"/>
+          </div>
+          <div>
+            <label class="label">Token</label>
+            <div class="relative">
+              <input class="field field-sm font-mono pr-9" :type="showRustToken ? 'text' : 'password'" x-model="configEdit.rust_bot_token" placeholder="upi_…" spellcheck="false" autocomplete="off"/>
+              <button type="button" class="absolute right-1.5 top-1/2 -translate-y-1/2 btn btn-ghost btn-icon !w-7 !h-7 !p-0" @click="showRustToken = !showRustToken" :title="showRustToken ? 'Hide token' : 'Show token'" :aria-label="showRustToken ? 'Hide token' : 'Show token'">
+                <svg class="w-3.5 h-3.5 text-ink-500" aria-hidden="true"><use :href="showRustToken ? '#i-eye-off' : '#i-eye'"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-secondary btn-xs" @click="testRust()" :disabled="testingRust">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-plug"/></svg>
+              <span x-text="testingRust ? 'Testing…' : 'Test connection'"></span>
+            </button>
+            <span class="text-[11px] font-mono" :class="testRustMsg.startsWith('OK') ? 'text-emerald-600' : (testRustMsg ? 'text-rose-600' : 'text-ink-400')" x-text="testRustMsg"></span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 pt-1">
+            <div class="rounded-lg bg-white border border-ink-200/70 px-2.5 py-1.5">
+              <div class="text-[9.5px] uppercase tracking-wider text-ink-400 font-semibold">Credit</div>
+              <div class="text-[15px] font-bold tabular-nums text-emerald-600" x-text="account.balance ?? '—'"></div>
+            </div>
+            <div class="rounded-lg bg-white border border-ink-200/70 px-2.5 py-1.5">
+              <div class="text-[9.5px] uppercase tracking-wider text-ink-400 font-semibold">Reserved</div>
+              <div class="text-[15px] font-bold tabular-nums text-amber-600" x-text="account.reserved ?? '—'"></div>
+            </div>
+            <div class="rounded-lg bg-white border border-ink-200/70 px-2.5 py-1.5">
+              <div class="text-[9.5px] uppercase tracking-wider text-ink-400 font-semibold">User</div>
+              <div class="text-[13px] font-semibold tabular-nums text-ink-700 truncate" x-text="account.user_id ? ('#'+account.user_id) : '—'"></div>
+            </div>
+          </div>
+          <div class="text-[11px] text-ink-400 font-mono" x-show="account.key_prefix" x-text="'key: '+account.key_prefix+'…'"></div>
+        </section>
+
+        <!-- Telegram -->
+        <section class="rounded-xl border border-ink-200/70 bg-ink-50/40 p-4 space-y-3">
+          <div class="flex items-center gap-2 text-ink-700">
+            <svg class="w-4 h-4 text-accent" aria-hidden="true"><use href="#i-send"/></svg>
+            <h4 class="text-[12px] font-semibold uppercase tracking-wider">Telegram</h4>
+          </div>
+          <div>
+            <label class="label">Bot token</label>
+            <div class="relative">
+              <input class="field field-sm font-mono pr-9" :type="showTgToken ? 'text' : 'password'" x-model="configEdit.telegram_bot_token" spellcheck="false" autocomplete="off"/>
+              <button type="button" class="absolute right-1.5 top-1/2 -translate-y-1/2 btn btn-ghost btn-icon !w-7 !h-7 !p-0" @click="showTgToken = !showTgToken" :title="showTgToken ? 'Hide token' : 'Show token'" :aria-label="showTgToken ? 'Hide token' : 'Show token'">
+                <svg class="w-3.5 h-3.5 text-ink-500" aria-hidden="true"><use :href="showTgToken ? '#i-eye-off' : '#i-eye'"/></svg>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="label">Chat ID</label>
+            <input class="field field-sm font-mono" x-model="configEdit.telegram_chat_id" spellcheck="false"/>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 text-[12px] text-ink-600">
+              <input type="checkbox" class="check" x-model="configEdit.telegram_enabled"/> Enable Telegram
+            </label>
+            <div class="seg">
+              <template x-for="m in ['off','qr_only','all']" :key="m">
+                <button type="button" :class="configEdit.telegram_mode===m && 'on'" @click="configEdit.telegram_mode=m" x-text="m"></button>
+              </template>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" class="btn btn-secondary btn-xs" @click="testTelegram()">
+              <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-send"/></svg> Send test
+            </button>
+            <span class="text-[11px] text-ink-400 font-mono" x-text="testTgMsg"></span>
+          </div>
+        </section>
+
+        <!-- Pipeline -->
+        <section class="rounded-xl border border-ink-200/70 bg-ink-50/40 p-4 space-y-3 md:col-span-2">
+          <div class="flex items-center gap-2 text-ink-700">
+            <svg class="w-4 h-4 text-accent" aria-hidden="true"><use href="#i-queue"/></svg>
+            <h4 class="text-[12px] font-semibold uppercase tracking-wider">Pipeline</h4>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <div><label class="label">Concurrency</label><input type="number" min="1" max="20" class="field field-sm" x-model.number="configEdit.concurrency_limit"/></div>
+            <div><label class="label">Poll sec</label><input type="number" class="field field-sm" x-model.number="configEdit.poll_interval_seconds"/></div>
+            <div><label class="label">Poll budget</label><input type="number" class="field field-sm" x-model.number="configEdit.poll_budget"/></div>
+            <div><label class="label">Hard TO</label><input type="number" class="field field-sm" x-model.number="configEdit.hard_timeout_seconds"/></div>
+            <div><label class="label">Retry</label><input type="number" class="field field-sm" x-model.number="configEdit.pipeline_retry_limit"/></div>
+            <div><label class="label">Stale</label><input type="number" class="field field-sm" x-model.number="configEdit.stale_threshold_seconds"/></div>
+          </div>
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-ink-600 pt-1">
+            <label class="flex items-center gap-2"><input type="checkbox" class="check" x-model="configEdit.blocklist_enabled"/> Blocklist</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="check" x-model="configEdit.skip_session_cache"/> Skip cache</label>
+            <label class="flex items-center gap-1.5">Auto-block threshold
+              <input type="number" min="1" max="10" class="field field-sm w-14" x-model.number="configEdit.blocklist_auto_threshold"/>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <!-- Modal footer -->
+      <div class="shrink-0 flex items-center gap-2 px-5 py-3.5 border-t border-ink-100 bg-ink-50/50 rounded-b-2xl">
+        <a href="/api/logs/export" class="btn btn-ghost btn-xs">
+          <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-download"/></svg> Export log
+        </a>
+        <div class="flex-1"></div>
+        <button type="button" class="btn btn-secondary" @click="loadConfig()">Reset</button>
+        <button type="button" class="btn btn-primary" @click="saveConfig()">
+          <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-check"/></svg> Save settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm modal -->
+  <div x-show="confirmDialog" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-950/50 backdrop-blur-[2px]" @keydown.escape.window="confirmDialog=null">
+    <div class="bg-white rounded-xl shadow-2xl shadow-ink-950/20 w-full max-w-sm border border-ink-200 p-5 pop-in" @click.outside="confirmDialog=null">
+      <div class="flex items-start gap-3">
+        <div class="w-9 h-9 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4" aria-hidden="true"><use href="#i-info"/></svg>
+        </div>
+        <div class="min-w-0">
+          <h3 class="text-[14px] font-semibold text-ink-900" x-text="confirmDialog?.title||''"></h3>
+          <p class="mt-1 text-[13px] text-ink-500" x-text="confirmDialog?.detail||''"></p>
+          <p class="mt-1 text-[12px] text-ink-400 font-mono" x-text="confirmDialog?.countLabel || ('Affects: ' + (confirmDialog?.count||0) + ' job(s)')"></p>
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end gap-2">
+        <button type="button" class="btn btn-secondary" @click="confirmDialog=null">Cancel</button>
+        <button type="button" class="btn btn-danger-solid" @click="runConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR modal -->
+  <div x-show="qrModal" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-950/50 backdrop-blur-[2px]" @keydown.escape.window="qrModal=null">
+    <div class="bg-white rounded-xl shadow-2xl shadow-ink-950/20 w-full max-w-xs border border-ink-200 p-4 pop-in" @click.outside="qrModal=null">
+      <div class="flex items-center justify-between mb-3">
+        <div class="min-w-0">
+          <div class="text-[13px] font-semibold truncate" x-text="qrModal?.email||''"></div>
+          <div class="text-[11px] text-ink-400" x-text="'Expires in ~' + (qrModal?.expiry??'?') + 's'"></div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon" @click="qrModal=null" aria-label="Close">
+          <svg class="w-4 h-4" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="rounded-lg border border-ink-100 bg-ink-50 p-2">
+        <img :src="qrModal ? '/api/jobs/'+qrModal.job_id+'/qr.png?t='+Date.now() : ''" class="w-full rounded-md bg-white" alt="Payment QR"/>
+      </div>
+      <a x-show="qrModal?.link" :href="qrModal?.link" target="_blank" rel="noopener"
+         class="btn btn-primary w-full mt-3">
+        <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#i-link"/></svg>
+        Open payment link
+      </a>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="toast-in pointer-events-auto bg-ink-950/95 text-white text-[12.5px] px-3.5 py-2.5 rounded-lg shadow-xl shadow-ink-950/30 ring-1 ring-white/10 max-w-sm flex items-start gap-2">
+        <svg class="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" aria-hidden="true"><use href="#i-check"/></svg>
+        <span x-text="t.msg"></span>
+      </div>
+    </template>
+  </div>
+
+  <script>
+  function app() {
+    const ACTIVE = new Set(['logging_in','session_ready','submitting_bot','awaiting_qr','qr_ready']);
+    const RERUN = new Set(['failed','stopped','stale','done','plus_confirmed','free_timeout']);
+    const CHECK = new Set(['done','qr_ready']);
+    const BACKOFF = [1000,2000,5000,10000,20000];
+    const STATE_LABELS = {
+      queued:'Queued', held:'Held', logging_in:'Logging in',
+      session_ready:'Session ready', submitting_bot:'Submitting bot',
+      awaiting_qr:'Waiting for QR', qr_ready:'QR ready', done:'Done',
+      polling_plus:'Checking Plus', plus_confirmed:'Plus confirmed',
+      free_timeout:'Still Free', retry_scheduled:'Retry scheduled',
+      failed:'Failed', stopped:'Stopped', stale:'Stale',
+    };
+    const LOG_DOT = {
+      done:'bg-emerald-500', plus_confirmed:'bg-emerald-500', free_timeout:'bg-amber-500',
+      failed:'bg-rose-500', stale:'bg-rose-400', stopped:'bg-ink-400',
+      held:'bg-violet-500', retry_scheduled:'bg-amber-500', queued:'bg-ink-300',
+      qr_ready:'bg-indigo-500',
+    };
+    return {
+      jobs: {},
+      config: {},
+      configEdit: {},
+      filter: 'all',
+      search: '',
+      rawText: '',
+      selectedJobId: null,
+      account: {},
+      accountLoading: false,
+      showConfig: false,
+      sseOk: false,
+      sseRetries: 0,
+      _sse: null,
+      _sseTimer: null,
+      _sseGen: 0,
+      _lastSeq: 0,
+      _loadEpoch: 0,
+      _pollTimer: null,
+      DRAFT_KEY: 'plusqr.accountsDraft',
+      toasts: [],
+      confirmDialog: null,
+      qrModal: null,
+      plusContent: '',
+      doneContent: '',
+      submitMsg: '',
+      submitting: false,
+      testRustMsg: '',
+      testingRust: false,
+      showRustToken: false,
+      showTgToken: false,
+      testTgMsg: '',
+      skipCacheBatch: false,
+      paused: false,
+      _tick: 0,
+      filterTabs: [
+        {id:'all', label:'All'},
+        {id:'active', label:'Running'},
+        {id:'done', label:'Done'},
+        {id:'plus', label:'Plus'},
+        {id:'error', label:'Errors'},
+        {id:'held', label:'Held'},
+      ],
+      get stats() {
+        const s = {total:0,active:0,done:0,plus:0,failed:0,held:0,stopped:0,stale:0};
+        for (const j of Object.values(this.jobs)) {
+          s.total++;
+          if (ACTIVE.has(j.state)) s.active++;
+          if (j.state==='done') s.done++;
+          if (j.plan_result==='plus' || j.state==='plus_confirmed') s.plus++;
+          if (j.state==='failed') s.failed++;
+          if (j.state==='held') s.held++;
+          if (j.state==='stopped') s.stopped++;
+          if (j.state==='stale') s.stale++;
+        }
+        return s;
+      },
+      get preview() {
+        const lines = (this.rawText||'').split(/\n/);
+        let valid=0, invalid=0;
+        const re = /^[^\s@|]+@[^\s@|]+\.[^\s@|]+\|[^|]{1,128}\|[A-Za-z2-7=]{16,64}$/;
+        for (const ln of lines) {
+          const t = ln.trim();
+          if (!t) continue;
+          if (re.test(t)) valid++; else invalid++;
+        }
+        return {valid, invalid};
+      },
+      get plusLines() {
+        return (this.plusContent||'').split('\n').filter(l=>l.trim()).length;
+      },
+      get doneLines() {
+        return (this.doneContent||'').split('\n').filter(l=>l.trim()).length;
+      },
+      init() {
+        this.restoreDraft();
+        this.loadConfig();
+        this.loadJobs();
+        this.connectSSE();
+        this.refreshResults();
+        this.loadAccount();
+        this.loadPauseStatus();
+        this.$watch('rawText', (v) => { this.persistDraft(v); });
+        window.addEventListener('beforeunload', () => this.persistDraft(this.rawText));
+        // Catch-up khi tab ẩn/hiện hoặc mạng offline→online
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) this.forceSync('visibility');
+        });
+        window.addEventListener('focus', () => this.forceSync('focus'));
+        window.addEventListener('online', () => {
+          this.connectSSE();
+          this.forceSync('online');
+        });
+        // Poll fallback: SSE miss vẫn tự chữa — nhanh khi đang chạy / SSE đứt
+        this._pollTimer = setInterval(() => this.pollSync(), 2000);
+        setInterval(() => { this.refreshResults(); }, 15000);
+        setInterval(() => { this.loadAccount(); }, 60000);
+        setInterval(() => { this._tick++; }, 1000);
+      },
+      hasLiveWork() {
+        for (const j of Object.values(this.jobs)) {
+          if (ACTIVE.has(j.state) || j.state === 'queued' || j.state === 'retry_scheduled') return true;
+        }
+        return false;
+      },
+      async forceSync(_why) {
+        await this.loadJobs();
+        this.loadPauseStatus();
+      },
+      async pollSync() {
+        // Luôn poll khi SSE down; khi OK thì poll nếu còn job đang chạy (an toàn)
+        if (!this.sseOk || this.hasLiveWork()) {
+          await this.loadJobs();
+        }
+      },
+      restoreDraft() {
+        try {
+          const v = localStorage.getItem(this.DRAFT_KEY);
+          if (typeof v === 'string') this.rawText = v;
+        } catch(_){}
+      },
+      persistDraft(v) {
+        try { localStorage.setItem(this.DRAFT_KEY, v ?? ''); } catch(_){}
+      },
+      confirmClearInput() {
+        const n = (this.rawText||'').split(/\n/).filter(l=>l.trim()).length;
+        this.confirmDialog = {
+          title: 'Clear input',
+          detail: 'Xóa toàn bộ text trong ô Accounts. Thao tác này không thể hoàn tác.',
+          count: n,
+          countLabel: 'Lines: ' + n,
+          fn: () => this.clearInput(),
+        };
+      },
+      clearInput() {
+        this.rawText = '';
+        this.persistDraft('');
+        this.submitMsg = '';
+        this.toast('Input cleared');
+      },
+      replaceJobs(list) {
+        const next = {};
+        for (const j of (list || [])) {
+          if (j && j.job_id) next[j.job_id] = j;
+        }
+        this.jobs = next;
+      },
+      noteSeq(seq) {
+        const n = Number(seq);
+        if (!Number.isFinite(n) || n <= 0) return true;
+        if (n < this._lastSeq) return false; // stale
+        this._lastSeq = n;
+        return true;
+      },
+      seqGap(seq) {
+        const n = Number(seq);
+        if (!Number.isFinite(n) || n <= 0 || !this._lastSeq) return false;
+        return n > this._lastSeq + 1;
+      },
+      async loadJobs() {
+        const epoch = ++this._loadEpoch;
+        try {
+          const r = await fetch('/api/jobs', { cache: 'no-store' });
+          if (!r.ok || epoch !== this._loadEpoch) return;
+          const seq = parseInt(r.headers.get('X-Jobs-Seq') || '0', 10);
+          // Không ghi đè state mới hơn từ SSE
+          if (seq && this._lastSeq && seq < this._lastSeq) return;
+          const list = await r.json();
+          if (epoch !== this._loadEpoch) return;
+          this.replaceJobs(list);
+          if (seq) this._lastSeq = Math.max(this._lastSeq, seq);
+        } catch(_){}
+      },
+      async loadPauseStatus() {
+        try {
+          const r = await fetch('/api/jobs/pause-status');
+          const d = await r.json();
+          this.paused = !!d.paused;
+        } catch(_){}
+      },
+      async togglePause() {
+        const url = this.paused ? '/api/jobs/resume' : '/api/jobs/pause';
+        const r = await fetch(url, {method:'POST'});
+        const d = await r.json().catch(()=>({}));
+        if (!r.ok) { this.toast('Error: '+(d.error_code||r.status)); return; }
+        this.paused = !!d.paused;
+        await this.loadJobs();
+        if (this.paused) this.toast('Paused · holding '+(d.held||0)+' pending jobs');
+        else this.toast('Resumed · running '+(d.started||0)+' jobs');
+      },
+      async loadAccount() {
+        if (this.accountLoading) return;
+        this.accountLoading = true;
+        try {
+          const r = await fetch('/api/account');
+          this.account = await r.json();
+        } catch(_) {
+          this.account = {ok:false, error:'network'};
+        } finally {
+          this.accountLoading = false;
+        }
+      },
+      tabCount(id) {
+        const s = this.stats;
+        if (id==='all') return s.total;
+        if (id==='active') return s.active;
+        if (id==='done') return s.done;
+        if (id==='plus') return s.plus;
+        if (id==='error') return s.failed + s.stale;
+        if (id==='held') return s.held;
+        return 0;
+      },
+      async setFlow(mode) {
+        this.configEdit.flow_mode = mode;
+        this.config.flow_mode = mode;
+        try {
+          await fetch('/api/settings/flow_mode', {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({value: mode})
+          });
+        } catch(_){}
+      },
+      async loadConfig() {
+        const r = await fetch('/api/settings');
+        this.config = await r.json();
+        // Hiển thị full API key — không che, không xóa sau Save
+        this.configEdit = {...this.config};
+      },
+      async saveConfig() {
+        const body = {...this.configEdit};
+        const tok = (body.rust_bot_token || '').trim();
+        const tg = (body.telegram_bot_token || '').trim();
+        body.rust_bot_base_url = (body.rust_bot_base_url || '').trim();
+        if (!tok) delete body.rust_bot_token;
+        else body.rust_bot_token = tok;
+        if (!tg) delete body.telegram_bot_token;
+        else body.telegram_bot_token = tg;
+        const r = await fetch('/api/settings/bulk', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(()=>({}));
+          this.toast('Save failed: ' + (e.message||r.status));
+          return;
+        }
+        const saved = await r.json();
+        this.config = saved;
+        this.configEdit = {...saved};
+        this.toast(tok ? 'Settings saved · API key updated' : 'Settings saved');
+        this.testRustMsg = '';
+        if (tok || (saved.rust_bot_token || '').trim()) {
+          await this.testRust({ useSaved: true });
+        }
+      },
+      async testRust(opts = {}) {
+        if (this.testingRust) return;
+        this.testingRust = true;
+        this.testRustMsg = '';
+        try {
+          const draftTok = (this.configEdit.rust_bot_token || '').trim();
+          const draftBase = (this.configEdit.rust_bot_base_url || '').trim();
+          const body = {};
+          if (!opts.useSaved) {
+            if (draftBase) body.base_url = draftBase;
+            if (draftTok) body.token = draftTok;
+          }
+          if (!opts.useSaved && !body.token) {
+            this.testRustMsg = 'FAIL · paste API key in Token field first';
+            return;
+          }
+          const r = await fetch('/api/test/rust-bot', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body),
+          });
+          const d = await r.json().catch(()=>({}));
+          if (d.ok) {
+            this.testRustMsg = `OK ${d.status} · ${d.latency_ms}ms · ${d.balance ?? '?'} credit`;
+            this.account = d;
+          } else {
+            const err = d.error || d.message || r.status;
+            this.testRustMsg = `FAIL ${d.status||''} · ${err}`.trim();
+            if (d.status === 401 || err === 'unauthorized') {
+              this.toast('401 Unauthorized — check full API key, then Save');
+            }
+          }
+        } finally {
+          this.testingRust = false;
+        }
+      },
+      async testTelegram() {
+        const bot = (this.configEdit.telegram_bot_token || '').trim();
+        const chat = (this.configEdit.telegram_chat_id || '').trim();
+        if (!bot || !chat) {
+          this.testTgMsg = 'FAIL · 0ms · fill Bot token and Chat ID, then Save';
+          this.toast('Fill Telegram Bot token + Chat ID');
+          return;
+        }
+        const r = await fetch('/api/test/telegram', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ bot_token: bot, chat_id: chat }),
+        });
+        const d = await r.json().catch(()=>({}));
+        this.testTgMsg = (d.ok?'OK':'FAIL') + ' · ' + (d.latency_ms||0) + 'ms' + (d.error?(' · '+d.error):'');
+        if (d.ok) this.toast('Telegram OK — click Save settings to persist');
+        else this.toast('Telegram test failed');
+      },
+      connectSSE() {
+        if (this._sseTimer) { clearTimeout(this._sseTimer); this._sseTimer = null; }
+        if (this._sse) { try { this._sse.close(); } catch(_){} this._sse = null; }
+        const gen = ++this._sseGen;
+        const es = new EventSource('/api/jobs/stream');
+        this._sse = es;
+        const parse = (raw) => { try { return JSON.parse(raw); } catch(_){ return null; } };
+        const onEvt = (e) => {
+          if (gen !== this._sseGen) return;
+          this.applyUpdate(parse(e.data));
+        };
+        es.addEventListener('snapshot', onEvt);
+        es.addEventListener('job', onEvt);
+        es.addEventListener('bulk', onEvt);
+        es.addEventListener('resync', (e) => {
+          if (gen !== this._sseGen) return;
+          const d = parse(e.data);
+          if (d && d.seq) this._lastSeq = Math.max(this._lastSeq, Number(d.seq) || 0);
+          this.loadJobs();
+        });
+        es.addEventListener('ping', (e) => {
+          if (gen !== this._sseGen) return;
+          this.sseOk = true;
+          const d = parse(e.data);
+          if (d && this.seqGap(d.seq)) {
+            this._lastSeq = Number(d.seq) || this._lastSeq;
+            this.loadJobs();
+          } else if (d && d.seq) {
+            this._lastSeq = Math.max(this._lastSeq, Number(d.seq) || 0);
+          }
+        });
+        es.onmessage = onEvt;
+        es.onopen = () => {
+          if (gen !== this._sseGen) return;
+          this.sseOk = true;
+          this.sseRetries = 0;
+          // Reconnect gap: HTTP sync song song snapshot
+          this.loadJobs();
+        };
+        es.onerror = () => {
+          if (gen !== this._sseGen) return;
+          this.sseOk = false;
+          // Fill gap ngay khi đứt — không chờ reconnect xong
+          this.loadJobs();
+          try { es.close(); } catch(_){}
+          if (this._sse === es) this._sse = null;
+          const wait = BACKOFF[Math.min(this.sseRetries, BACKOFF.length - 1)];
+          this.sseRetries++;
+          this._sseTimer = setTimeout(() => {
+            if (gen === this._sseGen) this.connectSSE();
+          }, wait);
+        };
+      },
+      applyUpdate(data) {
+        if (!data) return;
+        if (data.type === 'ping') {
+          if (this.seqGap(data.seq)) this.loadJobs();
+          else this.noteSeq(data.seq);
+          return;
+        }
+        if (data.type === 'resync') {
+          if (data.seq) this._lastSeq = Math.max(this._lastSeq, Number(data.seq) || 0);
+          this.loadJobs();
+          return;
+        }
+        // Gap → full resync thay vì apply lệch
+        if (this.seqGap(data.seq)) {
+          this._lastSeq = Math.max(this._lastSeq, Number(data.seq) || 0);
+          this.loadJobs();
+          return;
+        }
+        if (data.seq != null && Number(data.seq) < this._lastSeq) return;
+        if (data.seq != null) this.noteSeq(data.seq);
+
+        if (data.type === 'deleted' && data.job_id) {
+          delete this.jobs[data.job_id];
+          if (this.selectedJobId === data.job_id) this.selectedJobId = null;
+          this.jobs = {...this.jobs};
+          return;
+        }
+        if (data.type === 'snapshot' && Array.isArray(data.jobs)) {
+          this.replaceJobs(data.jobs);
+          return;
+        }
+        if (data.type === 'bulk') {
+          if (data.action === 'pause' || data.action === 'resume') {
+            this.paused = !!data.paused;
+          }
+          if (Array.isArray(data.jobs)) this.replaceJobs(data.jobs);
+          else this.loadJobs();
+          if (data.action === 'clear' || data.action === 'rerun_failed') {
+            this.refreshResults();
+          }
+          return;
+        }
+        if (data.job_id && data.state) {
+          this.jobs[data.job_id] = data;
+          this.jobs = {...this.jobs};
+          if (data.state === 'done' || data.state === 'plus_confirmed') {
+            this.refreshResults();
+            this.loadAccount();
+          }
+        }
+      },
+      filteredJobs() {
+        void this._tick;
+        const q = (this.search||'').toLowerCase();
+        return Object.values(this.jobs).filter(j => {
+          if (q && !(j.email||'').toLowerCase().includes(q)) return false;
+          if (this.filter==='all') return true;
+          if (this.filter==='active') return ACTIVE.has(j.state);
+          if (this.filter==='done') return j.state==='done';
+          if (this.filter==='plus') return j.plan_result==='plus' || j.state==='plus_confirmed';
+          if (this.filter==='error') return j.state==='failed' || j.state==='stale';
+          if (this.filter==='held') return j.state==='held';
+          return true;
+        }).sort((a,b)=>(b.created_at||0)-(a.created_at||0));
+      },
+      isActive(s){ return ACTIVE.has(s); },
+      isRerunnable(s){ return RERUN.has(s); },
+      canCheck(s){ return CHECK.has(s); },
+      selectedJob(){ return this.selectedJobId ? this.jobs[this.selectedJobId] : null; },
+      stateLabel(s){ return STATE_LABELS[s] || s; },
+      logDotClass(s){ return LOG_DOT[s] || 'bg-sky-500'; },
+      logTime(at){
+        if (!at) return '';
+        const d = new Date(at*1000);
+        return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
+      },
+      badgeClass(s) {
+        const m = {
+          done: 'bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-400 font-semibold',
+          plus_confirmed: 'bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-300',
+          free_timeout: 'bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-300',
+          failed: 'bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-300',
+          stale: 'bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-300',
+          held: 'bg-violet-100 text-violet-800 ring-1 ring-inset ring-violet-300',
+          stopped: 'bg-ink-200 text-ink-700 ring-1 ring-inset ring-ink-300',
+          qr_ready: 'chip-live bg-indigo-100 text-indigo-800 ring-1 ring-inset ring-indigo-300',
+          retry_scheduled: 'bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-300',
+          queued: 'bg-ink-200 text-ink-700 ring-1 ring-inset ring-ink-300',
+        };
+        return m[s] || 'chip-live bg-sky-100 text-sky-800 ring-1 ring-inset ring-sky-300';
+      },
+      elapsed(j) {
+        void this._tick;
+        if (!j.started_at) return '—';
+        const end = j.ended_at || (Date.now()/1000);
+        const s = Math.max(0, Math.floor(end - j.started_at));
+        const m = Math.floor(s/60); const r = s%60;
+        return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
+      },
+      async submit(mode) {
+        if (this.submitting) return;
+        this.submitting = true;
+        try {
+          const r = await fetch('/api/jobs/submit', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              raw_text: this.rawText,
+              dispatch_mode: mode,
+              skip_session_cache: this.skipCacheBatch || undefined,
+            })
+          });
+          const d = await r.json().catch(()=>({}));
+          if (!r.ok) {
+            this.toast('Submit failed: ' + (d.error_code || r.status));
+            return;
+          }
+          const dup = d.duplicate_count || (d.skipped||[]).filter(s=>s.reason==='duplicate_job').length;
+          this.submitMsg = `Created ${d.created?.length||d.valid_count||0}` +
+            ` · errors ${d.error_count||0}` +
+            (dup ? ` · duplicate ${dup}` : '') +
+            ((d.skipped?.length && !dup) ? ` · blocked ${d.skipped.length}` : '') +
+            (dup && d.skipped?.length > dup ? ` · blocked ${d.skipped.length - dup}` : '');
+          this.toast(dup
+            ? `Created ${d.created?.length||0} · skipped ${dup} duplicate email (1 email = 1 job)`
+            : this.submitMsg);
+          if (d.created) {
+            for (const j of d.created) this.jobs[j.job_id] = j;
+            this.jobs = {...this.jobs};
+          }
+          await this.loadJobs();
+          if (mode === 'immediate') this.filter = 'active';
+          else if (mode === 'hold') this.filter = 'held';
+        } finally {
+          this.submitting = false;
+        }
+      },
+      async jobAction(id, action) {
+        const r = await fetch(`/api/jobs/${id}/${action}`, {method:'POST'});
+        const d = await r.json().catch(()=>({}));
+        if (!r.ok) {
+          this.toast('Error: ' + (d.error_code||r.status));
+          return;
+        }
+        if (d.job_id && d.state) {
+          this.applyUpdate(d);
+        } else if (action === 'check-plan') {
+          const cur = this.jobs[id];
+          if (cur) {
+            this.jobs[id] = {
+              ...cur,
+              plan_result: d.plan_result || d.result,
+              state: d.state || cur.state,
+            };
+            this.jobs = {...this.jobs};
+            if (d.result === 'plus') this.refreshResults();
+          }
+        }
+        await this.loadJobs();
+        if (action==='rerun') {
+          this.filter = 'active';
+          this.toast('Rerun → ' + (d.new_job_id||'').slice(0,8));
+        } else if (action==='check-plan') this.toast('Plus: ' + d.result);
+        else this.toast('OK · ' + action);
+      },
+      async bulk(name) {
+        let url = '', method='POST';
+        if (name==='stop_all') url='/api/jobs/stop-all';
+        if (name==='start_all_held') url='/api/jobs/start-all-held';
+        if (name==='rerun_failed') url='/api/jobs/rerun-failed';
+        if (name==='clear_failed') { url='/api/jobs/clear?filter=failed'; method='DELETE'; }
+        if (name==='clear_done') { url='/api/jobs/clear?filter=done'; method='DELETE'; }
+        if (name==='clear_all') { url='/api/jobs/clear?filter=all&confirm=true'; method='DELETE'; }
+        const r = await fetch(url, {method, cache:'no-store'});
+        const d = await r.json().catch(()=>({}));
+        if (!r.ok) { this.toast('Error: '+(d.error_code||r.status)); return; }
+        // Sync ngay từ API — không phụ thuộc SSE / F5
+        await this.loadJobs();
+        if (name.startsWith('clear')) {
+          const outs = d.outputs || {};
+          const outNote = name==='clear_all'
+            ? ` · outputs done ${outs.done||0}/plus ${outs.plus||0}`
+            : '';
+          this.toast('Cleared ' + (d.cleared||0) + ' jobs' + outNote);
+          await this.refreshResults();
+          this.filter = 'all';
+        } else if (name==='stop_all') {
+          this.toast('Stopped '+(d.stopped||0)+' · skipped '+(d.skipped||0));
+        } else if (name==='start_all_held') {
+          this.filter = 'active';
+          this.toast('Started '+(d.started||0)+' held jobs');
+        } else if (name==='rerun_failed') {
+          // Job failed cũ vẫn còn; job mới vào Active — chuyển tab để thấy ngay
+          this.filter = 'active';
+          this.toast('Retry '+(Array.isArray(d)?d.length:0)+' · xem tab Running');
+        }
+      },
+      confirmBulk(name) {
+        const map = {
+          stop_all: {title:'Stop all', detail:'Stop every running or pending job.', count: this.stats.active + this.stats.held, fn:()=>this.bulk('stop_all')},
+          clear_failed: {title:'Clear failed jobs', detail:'Only clears jobs with state = failed.', count: Object.values(this.jobs).filter(j=>j.state==='failed').length, fn:()=>this.bulk('clear_failed')},
+          clear_done: {title:'Clear finished jobs', detail:'Clears done / stopped.', count: Object.values(this.jobs).filter(j=>['done','plus_confirmed','free_timeout','stopped'].includes(j.state)).length, fn:()=>this.bulk('clear_done')},
+          clear_all: {title:'Clear all', detail:'Delete every job (including running) and wipe Done + Plus output files.', count: this.stats.total, fn:()=>this.bulk('clear_all')},
+        };
+        this.confirmDialog = map[name];
+      },
+      confirmJob(action, j) {
+        if (action==='stop') {
+          this.confirmDialog = {title:'Stop job', detail:j.email, count:1, fn:()=>this.jobAction(j.job_id,'stop')};
+        } else if (action==='remove') {
+          this.confirmDialog = {title:'Delete job', detail:j.email, count:1, fn: async ()=>{
+            const r = await fetch('/api/jobs/'+j.job_id, {method:'DELETE'});
+            if (r.ok) { delete this.jobs[j.job_id]; this.jobs={...this.jobs}; this.toast('Deleted'); }
+          }};
+        }
+      },
+      async runConfirm() {
+        const fn = this.confirmDialog?.fn;
+        this.confirmDialog = null;
+        if (fn) await fn();
+      },
+      openQr(j) {
+        this.qrModal = {job_id:j.job_id, email:j.email, expiry:j.qr?.expiry_seconds, link:j.qr?.payment_link};
+      },
+      async refreshResults() {
+        try {
+          const [d,p] = await Promise.all([
+            fetch('/api/results/done').then(r=>r.json()),
+            fetch('/api/results/plus').then(r=>r.json()),
+          ]);
+          this.doneContent = d.content||'';
+          this.plusContent = p.content||'';
+        } catch(_){}
+      },
+      async copyResult(kind) {
+        const t = kind==='done' ? this.doneContent : this.plusContent;
+        try { await navigator.clipboard.writeText(t||''); this.toast('Copied '+kind); } catch(e){ this.toast('Copy failed'); }
+      },
+      toast(msg) {
+        const id = Date.now()+Math.random();
+        this.toasts.push({id, msg});
+        setTimeout(()=>{ this.toasts = this.toasts.filter(t=>t.id!==id); }, 3500);
+      },
+    }
+  }
+  </script>
+</body>
+</html>

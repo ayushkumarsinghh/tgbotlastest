@@ -1,0 +1,24 @@
+# Copy to config.yaml and set your real token.
+# config.yaml is gitignored — never commit secrets.
+
+rust_bot_base_url: https://upiapi.linhtd.com
+rust_bot_token: upi_changeme
+telegram_bot_token: ''
+telegram_chat_id: ''
+telegram_enabled: false
+telegram_mode: qr_only
+concurrency_limit: 5
+poll_interval_seconds: 120
+poll_budget: 3
+hard_timeout_seconds: 300
+pipeline_retry_limit: 1
+login_backoff_seconds:
+  - 2
+  - 5
+  - 15
+skip_session_cache: false
+flow_mode: auto
+blocklist_enabled: true
+blocklist_auto_threshold: 5
+session_cache_ttl_buffer_seconds: 300
+stale_threshold_seconds: 300
