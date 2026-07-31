@@ -237,38 +237,19 @@ def _snapshot_cookies(client: Any) -> dict[str, str]:
 
 
 async def _prime(client: Any, logger: logging.Logger) -> None:
-    """Step 0: warm Cloudflare cookie (GET `/auth/login`).
-
-    Skip nếu jar đã có ``__cf_bm`` (Cloudflare bot management token).
-    Retry tối đa 3 lần nếu 403.
-    """
     if _first_cookie_value(client, "__cf_bm"):
         return
     logger.info("[login] [0/9] prime chatgpt.com")
     headers = _nav_headers_html(f"{_CHATGPT_BASE}/", "same-origin")
 
-    for attempt in range(_HTTP_RETRY_ATTEMPTS):
-        try:
-            response = await client.get(
-                _URL_AUTH_LOGIN, headers=headers, allow_redirects=True
-            )
-        except (
-            Exception,
-            Exception,
-            Exception,
-        ) as exc:
-            logger.warning("[login] prime transport error: %s", exc)
-            raise LoginError(reason=_LOGIN_ERROR_NETWORK) from exc
-
-        if response.status_code == 403 and attempt < _HTTP_RETRY_ATTEMPTS - 1:
-            wait = (attempt + 1) * 5.0
-            logger.info("[login] prime 403 → retry in %ss", wait)
-            await asyncio.sleep(wait)
-            continue
-
-        if response.status_code >= 400:
-            raise LoginError(reason=_LOGIN_ERROR_NETWORK)
-        return
+    try:
+        response = await client.get(
+            _URL_AUTH_LOGIN, headers=headers, allow_redirects=True
+        )
+        logger.info("[login] prime status=%s", response.status_code)
+    except Exception as exc:
+        logger.warning("[login] prime notice (non-fatal): %s", exc)
+    return
 
 
 async def _step_csrf(

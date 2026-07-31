@@ -102,11 +102,11 @@ async def process_and_extract_credentials(text, http=None, chat_id=None):
                 if chat_id and http:
                     await send_tg_message(http, chat_id, f"**Authenticating Account** (`{email}`)... Please wait...")
 
-                token, status_msg = await login_account_credential(line_str)
+                token, plan, status_msg = await login_account_credential(line_str)
                 if token:
                     tokens.append(token)
                     if chat_id and http:
-                        await send_tg_message(http, chat_id, f"`{email}`: **Logged In & Access Token Generated!**")
+                        await send_tg_message(http, chat_id, f"`{email}` ({plan.upper()}): **Logged In & Access Token Generated!**")
                         # If CDK key is set, automatically trigger Pupux Kakao Pay QR Code generation!
                         if ACTIVE_CDK:
                             asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
@@ -701,12 +701,6 @@ async def main():
                 return
             bot_info = me_json.get("result", {})
             print(f"Telegram Bot Connected Successfully: @{bot_info.get('username')} ({bot_info.get('first_name')})")
-
-        # Start Discord Gateway Presence Task (turns bot Online )
-        asyncio.create_task(maintain_discord_presence(http))
-
-        # Start Discord Channel Listener Task
-        asyncio.create_task(poll_discord_channel(http))
 
         print("[System] Listening for updates 24/7...")
         while True:
