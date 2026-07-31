@@ -4,10 +4,18 @@ import os
 import sys
 import logging
 
+import json
+import re
+
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8711939395:AAFqMmnEZaVhJ2kk04aLft2llUP8iDOU8G8")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PUPUX_API_BASE = "https://ai.pupux.xyz/api/paylinks"
+
+# Discord Channel Auto-Sync Config (Set DISCORD_TOKEN in Railway Env Variables)
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
+DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID", "1532592499678384248")
+LAST_DISCORD_MSG_ID = None
 
 # Default runtime state
 ACTIVE_CDK = os.getenv("PUPUX_CDK", "")
@@ -19,6 +27,37 @@ STOCK_FILE = "token_stock.txt"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+def extract_access_tokens_from_text(text):
+    tokens = []
+    if not text:
+        return tokens
+        
+    # 1. Try parsing JSON directly to find "accessToken"
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            acc_tok = data.get("accessToken")
+            if acc_tok and isinstance(acc_tok, str) and len(acc_tok) > 50:
+                tokens.append(acc_tok.strip())
+    except Exception:
+        pass
+        
+    # 2. Search regex for "accessToken": "..." or raw JWT eyJ...
+    if not tokens:
+        match = re.search(r'"accessToken"\s*:\s*"([^"]+)"', text)
+        if match:
+            tok = match.group(1).strip()
+            if len(tok) > 50:
+                tokens.append(tok)
+                
+    if not tokens:
+        jwt_matches = re.findall(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', text)
+        for jm in jwt_matches:
+            if len(jm) > 50 and jm not in tokens:
+                tokens.append(jm)
+                
+    return tokens
 
 def load_stock():
     if not os.path.exists(STOCK_FILE):
@@ -339,6 +378,73 @@ async def handle_update(http, update):
             f"📦 Total Unused Stock: `{total_stock}` token(s)."
         )
 
+async def poll_discord_channel(http):
+    global LAST_DISCORD_MSG_ID
+    if not DISCORD_TOKEN or not DISCORD_CHANNEL_ID:
+        logger.info("[Discord Sync] DISCORD_TOKEN or DISCORD_CHANNEL_ID not set. Polling disabled.")
+        return
+
+    logger.info(f"[Discord Sync] Starting background listener for Discord Channel {DISCORD_CHANNEL_ID}...")
+    headers = {"Authorization": DISCORD_TOKEN}
+    url = f"https://discord.com/api/v9/channels/{DISCORD_CHANNEL_ID}/messages?limit=10"
+    
+    # Baseline fetch
+    try:
+        async with http.get(url, headers=headers, timeout=10) as resp:
+            if resp.status == 200:
+                msgs = await resp.json()
+                if msgs and isinstance(msgs, list):
+                    LAST_DISCORD_MSG_ID = msgs[0].get("id")
+                    logger.info(f"[Discord Sync] Baseline Message ID: {LAST_DISCORD_MSG_ID}")
+    except Exception as e:
+        logger.error(f"[Discord Sync] Initial fetch error: {e}")
+
+    while True:
+        await asyncio.sleep(4)  # Poll every 4 seconds
+        try:
+            poll_url = url
+            if LAST_DISCORD_MSG_ID:
+                poll_url = f"{url}&after={LAST_DISCORD_MSG_ID}"
+                
+            async with http.get(poll_url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    msgs = await resp.json()
+                    if msgs and isinstance(msgs, list):
+                        # Sort oldest to newest
+                        msgs.sort(key=lambda m: int(m.get("id", 0)))
+                        for msg in msgs:
+                            msg_id = msg.get("id")
+                            content = msg.get("content", "")
+                            author = msg.get("author", {}).get("username", "Unknown")
+                            
+                            # Also check attachments
+                            attachments = msg.get("attachments", [])
+                            for att in attachments:
+                                att_url = att.get("url")
+                                if att_url and (att_url.endswith(".txt") or att_url.endswith(".json")):
+                                    try:
+                                        async with http.get(att_url, timeout=10) as att_resp:
+                                            if att_resp.status == 200:
+                                                att_text = await att_resp.text()
+                                                content += f"\n{att_text}"
+                                    except Exception:
+                                        pass
+
+                            extracted = extract_access_tokens_from_text(content)
+                            if extracted:
+                                added, total_stock = add_to_stock(extracted)
+                                logger.info(f"[Discord Sync] ✅ Extracted {added} token(s) from Discord (@{author}). Total stock: {total_stock}")
+
+                            LAST_DISCORD_MSG_ID = msg_id
+                elif resp.status == 401:
+                    logger.error("[Discord Sync] ❌ Invalid Discord Token! HTTP 401 Unauthorized.")
+                    await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            break
+        except Exception as err:
+            logger.error(f"[Discord Sync] Error polling Discord: {err}")
+            await asyncio.sleep(5)
+
 async def main():
     print(f"[System] Starting Kakao Pay Telegram Bot (Direct Telegram API)...")
     offset = 0
@@ -351,6 +457,9 @@ async def main():
                 return
             bot_info = me_json.get("result", {})
             print(f"✅ Telegram Bot Connected Successfully: @{bot_info.get('username')} ({bot_info.get('first_name')})")
+
+        # Start Discord Channel Listener Task
+        asyncio.create_task(poll_discord_channel(http))
 
         print("[System] Listening for updates 24/7...")
         while True:
