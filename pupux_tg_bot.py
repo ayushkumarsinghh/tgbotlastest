@@ -128,14 +128,12 @@ async def process_and_extract_credentials(text, http=None, chat_id=None):
                             await send_tg_message(
                                 http, chat_id, 
                                 f"`{email}` (**{plan.upper()}**):\n\n"
-                                f"**Access Token**:\n`{token}`\n\n"
                                 f"Account is already **{plan.upper()}**! Skipped Kakao Pay link extraction."
                             )
                         else:
                             await send_tg_message(
                                 http, chat_id, 
-                                f"`{email}` (**{plan.upper()}**):\n\n"
-                                f"**Access Token**:\n`{token}`"
+                                f"**Authentication Success** (`{email}` | **{plan.upper()}**)\nExtracting Kakao Pay payment link..."
                             )
                             if ACTIVE_CDK:
                                 asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
@@ -419,8 +417,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
             if extracted_link:
                 results_delivered += 1
                 msg_text = (
-                    f"**Access Token**:\n`{token}`\n\n"
-                    f"**Payment Link**:\n`{extracted_link}`"
+                    f"**Kakao Pay Payment Link**:\n`{extracted_link}`"
                 )
                 await send_tg_message(http, chat_id, msg_text)
 
