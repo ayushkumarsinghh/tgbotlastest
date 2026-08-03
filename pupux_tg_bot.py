@@ -25,7 +25,7 @@ import re
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8845844055:AAHo-MDyyhRjX0SkHebQ9AjM-TSGLqG0Ap4")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-MASI_API_BASE = "https://masi.cc.cd"
+MASI_API_BASE = "https://masi.cc.cd/kakao/scan/api/integration"
 
 PROXY_URL = "http://sleepiness29:pmfMiEZSvK@66.93.161.197:50100"  # Hardcoded US Proxy
 TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
@@ -359,12 +359,12 @@ async def execute_extraction_batch(http, chat_id, tokens):
     results_delivered = 0
     for idx, token in enumerate(tokens, 1):
         try:
-            # 1. Create Job: POST https://masi.cc.cd/v1/kakao/jobs
+            # 1. Create Order: POST https://masi.cc.cd/kakao/scan/api/integration/orders
             create_payload = {"access_token": token}
-            logger.info(f"[Masi API] Submitting token #{idx} to {MASI_API_BASE}/v1/kakao/jobs with CDK {ACTIVE_CDK[:6]}...")
-            async with http.post(f"{MASI_API_BASE}/v1/kakao/jobs", headers=headers, json=create_payload, timeout=30) as resp:
+            logger.info(f"[Masi API] Submitting order #{idx} to {MASI_API_BASE}/orders with CDK {ACTIVE_CDK[:6]}...")
+            async with http.post(f"{MASI_API_BASE}/orders", headers=headers, json=create_payload, timeout=35) as resp:
                 resp_text = await resp.text()
-                logger.info(f"[Masi API] Create job status={resp.status}, body={resp_text}")
+                logger.info(f"[Masi API] Create order status={resp.status}, body={resp_text}")
                 try:
                     res = json.loads(resp_text)
                 except Exception:
@@ -372,47 +372,46 @@ async def execute_extraction_batch(http, chat_id, tokens):
 
                 if resp.status not in (200, 201, 202) or not res.get("ok"):
                     err_msg = res.get("error") or res.get("detail") or f"HTTP {resp.status}: {resp_text[:100]}"
-                    await send_tg_message(http, chat_id, f"**Job Submission Failed for Token #{idx}**\nReason: `{err_msg}`")
+                    await send_tg_message(http, chat_id, f"**Order Submission Failed for Token #{idx}**\nReason: `{err_msg}`")
                     continue
 
-                job_info = res.get("job") or {}
-                job_id = job_info.get("job_id")
+                order_info = res.get("order") or {}
+                order_id = order_info.get("order_id")
 
-            if not job_id:
-                await send_tg_message(http, chat_id, f"**Job Submission Error for Token #{idx}**: No job_id returned.")
+            if not order_id:
+                await send_tg_message(http, chat_id, f"**Order Submission Error for Token #{idx}**: No order_id returned.")
                 continue
 
             if status_msg_id:
-                await edit_tg_message(http, chat_id, status_msg_id, f"**Job #{idx} Queued (ID: `{job_id}`)**. Extracting link...")
+                await edit_tg_message(http, chat_id, status_msg_id, f"**Order #{idx} Created (ID: `{order_id}`)**. Extracting link...")
 
-            # 2. Poll Job Status: GET https://masi.cc.cd/v1/kakao/jobs/{job_id}
+            # 2. Poll Order Status: GET https://masi.cc.cd/kakao/scan/api/integration/orders/{order_id}
             poll_headers = {"X-CDK": ACTIVE_CDK}
             start_poll = time.time()
             extracted_link = None
 
-            while time.time() - start_poll < 120:  # Timeout after 2 minutes per job
-                await asyncio.sleep(2.5)
+            while time.time() - start_poll < 150:  # Timeout after 2.5 minutes per order
+                await asyncio.sleep(3.0)
                 try:
-                    async with http.get(f"{MASI_API_BASE}/v1/kakao/jobs/{job_id}", headers=poll_headers, timeout=30) as p_resp:
+                    async with http.get(f"{MASI_API_BASE}/orders/{order_id}", headers=poll_headers, timeout=30) as p_resp:
                         p_text = await p_resp.text()
                         try:
                             p_res = json.loads(p_text)
                         except Exception:
                             p_res = {}
-                        job_data = p_res.get("job") or {}
-                        st = job_data.get("status")
-                        logger.info(f"[Masi API] Poll job {job_id} status={st}, body={p_text}")
+                        order_data = p_res.get("order") or {}
+                        st = order_data.get("status")
+                        logger.info(f"[Masi API] Poll order {order_id} status={st}, body={p_text}")
 
                         if st == "completed":
-                            output = job_data.get("output") or {}
-                            extracted_link = output.get("long_url")
+                            extracted_link = order_data.get("link")
                             break
-                        elif st in ("failed", "canceled", "cancelled"):
-                            err_reason = job_data.get("error") or st
-                            await send_tg_message(http, chat_id, f"**Extraction Failed for Token #{idx}** (Job ID: `{job_id}`)\nReason: `{err_reason}`")
+                        elif st in ("failed", "expired", "canceled", "cancelled"):
+                            err_reason = order_data.get("error") or order_data.get("message") or st
+                            await send_tg_message(http, chat_id, f"**Extraction Failed for Token #{idx}** (Order ID: `{order_id}`)\nReason: `{err_reason}`")
                             break
                 except Exception as poll_err:
-                    logger.error(f"Polling error for job {job_id}: {poll_err}")
+                    logger.error(f"Polling error for order {order_id}: {repr(poll_err)}")
 
             if extracted_link:
                 results_delivered += 1
@@ -422,8 +421,8 @@ async def execute_extraction_batch(http, chat_id, tokens):
                 await send_tg_message(http, chat_id, msg_text)
 
         except Exception as job_err:
-            logger.error(f"Job execution error for token #{idx}: {job_err}")
-            await send_tg_message(http, chat_id, f"**Extraction Error for Token #{idx}**: `{job_err}`")
+            logger.error(f"Order execution error for token #{idx}: {repr(job_err)}")
+            await send_tg_message(http, chat_id, f"**Extraction Error for Token #{idx}**: `{repr(job_err)}`")
 
     final_text = f"**Completed! Delivered {results_delivered}/{len(tokens)} Kakao Pay Link(s).**"
     if status_msg_id:
@@ -480,19 +479,20 @@ async def handle_update(http, update):
         cdk_info_text = ""
         if ACTIVE_CDK:
             try:
-                headers = {"X-CDK": ACTIVE_CDK}
-                async with http.get(f"{MASI_API_BASE}/v1/cdk/status", headers=headers, timeout=10) as cdk_resp:
+                headers = {"X-CDK": ACTIVE_CDK, "Content-Type": "application/json"}
+                async with http.post(f"{MASI_API_BASE}/tickets/status", headers=headers, json={}, timeout=10) as cdk_resp:
                     cdk_res = await cdk_resp.json()
                     if cdk_res.get("ok"):
-                        stats = cdk_res.get("cdk") or {}
-                        rem = stats.get("remaining_uses", "N/A")
+                        stats = cdk_res.get("ticket") or {}
                         tot = stats.get("total_uses", "N/A")
+                        used = stats.get("used_uses", "N/A")
                         avail = stats.get("available_uses", "N/A")
                         pend = stats.get("pending_uses", "N/A")
                         cdk_info_text = (
                             f"\n**CDK Quota Stats**:\n"
-                            f"• Remaining Uses: `{rem}` / `{tot}`\n"
+                            f"• Total Uses: `{tot}`\n"
                             f"• Available Uses: `{avail}`\n"
+                            f"• Used Uses: `{used}`\n"
                             f"• Pending Uses: `{pend}`\n"
                         )
             except Exception as cdk_err:
