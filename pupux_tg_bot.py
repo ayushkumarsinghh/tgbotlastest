@@ -404,6 +404,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
             poll_headers = {"X-CDK": ACTIVE_CDK}
             start_poll = time.time()
             extracted_link = None
+            last_err_reason = None
 
             while time.time() - start_poll < 150:  # Timeout after 2.5 minutes per job
                 await asyncio.sleep(3.0)
@@ -423,8 +424,8 @@ async def execute_extraction_batch(http, chat_id, tokens):
                             extracted_link = out_data.get("long_url") or out_data.get("link") or job_data.get("link")
                             break
                         elif st in ("failed", "expired", "canceled", "cancelled"):
-                            err_reason = job_data.get("error") or job_data.get("message") or st
-                            await send_tg_message(http, chat_id, f"**Extraction Failed for Token #{idx}** (Job ID: `{job_id}`)\nReason: `{err_reason}`")
+                            last_err_reason = p_res.get("error") or job_data.get("error") or job_data.get("message") or st
+                            await send_tg_message(http, chat_id, f"❌ **Extraction Failed for Token #{idx}** (Job ID: `{job_id}`)\n**Reason**: `{last_err_reason}`")
                             break
                 except Exception as poll_err:
                     logger.error(f"Polling error for job {job_id}: {repr(poll_err)}")
@@ -435,6 +436,8 @@ async def execute_extraction_batch(http, chat_id, tokens):
                     f"**Kakao Pay Payment Link**:\n`{extracted_link}`"
                 )
                 await send_tg_message(http, chat_id, msg_text)
+            elif not last_err_reason:
+                await send_tg_message(http, chat_id, f"⏱️ **Extraction Timed Out for Token #{idx}** (Job ID: `{job_id}`)\nReason: `Masi API did not finish within 2.5 minutes.`")
 
         except Exception as job_err:
             logger.error(f"Extraction error for token #{idx}: {repr(job_err)}")
