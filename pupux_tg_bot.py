@@ -359,59 +359,75 @@ async def execute_extraction_batch(http, chat_id, tokens):
     results_delivered = 0
     for idx, token in enumerate(tokens, 1):
         try:
-            # 1. Create Order: POST https://masi.cc.cd/kakao/scan/api/integration/orders
             create_payload = {"access_token": token}
-            logger.info(f"[Masi API] Submitting order #{idx} to {MASI_API_BASE}/orders with CDK {ACTIVE_CDK[:6]}...")
-            async with http.post(f"{MASI_API_BASE}/orders", headers=headers, json=create_payload, timeout=35) as resp:
+            logger.info(f"[Pure Extraction API] Submitting token #{idx} to https://masi.cc.cd/v1/kakao/jobs with CDK {ACTIVE_CDK[:6]}...")
+            
+            job_id = None
+            # 1. Primary Extraction API: POST https://masi.cc.cd/v1/kakao/jobs
+            async with http.post("https://masi.cc.cd/v1/kakao/jobs", headers=headers, json=create_payload, timeout=35) as resp:
                 resp_text = await resp.text()
-                logger.info(f"[Masi API] Create order status={resp.status}, body={resp_text}")
+                logger.info(f"[Extraction API] Create job status={resp.status}, body={resp_text}")
                 try:
                     res = json.loads(resp_text)
                 except Exception:
                     res = {}
 
-                if resp.status not in (200, 201, 202) or not res.get("ok"):
-                    err_msg = res.get("error") or res.get("detail") or f"HTTP {resp.status}: {resp_text[:100]}"
-                    await send_tg_message(http, chat_id, f"**Order Submission Failed for Token #{idx}**\nReason: `{err_msg}`")
-                    continue
+                if resp.status in (200, 201, 202) and res.get("ok"):
+                    job_info = res.get("job") or {}
+                    job_id = job_info.get("job_id")
+                else:
+                    # Fallback to integration API orders if needed
+                    logger.info(f"[Extraction API] Fallback to integration orders endpoint...")
+                    async with http.post(f"{MASI_API_BASE}/orders", headers=headers, json=create_payload, timeout=35) as resp2:
+                        resp2_text = await resp2.text()
+                        logger.info(f"[Integration API] Create order status={resp2.status}, body={resp2_text}")
+                        try:
+                            res2 = json.loads(resp2_text)
+                        except Exception:
+                            res2 = {}
+                        if resp2.status in (200, 201, 202) and res2.get("ok"):
+                            order_info = res2.get("order") or {}
+                            job_id = order_info.get("order_id")
+                        else:
+                            err_msg = res.get("error") or res2.get("error") or f"HTTP {resp.status}"
+                            await send_tg_message(http, chat_id, f"**Job Submission Failed for Token #{idx}**\nReason: `{err_msg}`")
+                            continue
 
-                order_info = res.get("order") or {}
-                order_id = order_info.get("order_id")
-
-            if not order_id:
-                await send_tg_message(http, chat_id, f"**Order Submission Error for Token #{idx}**: No order_id returned.")
+            if not job_id:
+                await send_tg_message(http, chat_id, f"**Job Submission Error for Token #{idx}**: No job_id returned.")
                 continue
 
             if status_msg_id:
-                await edit_tg_message(http, chat_id, status_msg_id, f"**Order #{idx} Created (ID: `{order_id}`)**. Extracting link...")
+                await edit_tg_message(http, chat_id, status_msg_id, f"**Job #{idx} Queued (ID: `{job_id}`)**. Extracting Kakao Pay link...")
 
-            # 2. Poll Order Status: GET https://masi.cc.cd/kakao/scan/api/integration/orders/{order_id}
+            # 2. Poll Extraction Status: GET https://masi.cc.cd/v1/kakao/jobs/{job_id}
             poll_headers = {"X-CDK": ACTIVE_CDK}
             start_poll = time.time()
             extracted_link = None
 
-            while time.time() - start_poll < 150:  # Timeout after 2.5 minutes per order
+            while time.time() - start_poll < 150:  # Timeout after 2.5 minutes per job
                 await asyncio.sleep(3.0)
                 try:
-                    async with http.get(f"{MASI_API_BASE}/orders/{order_id}", headers=poll_headers, timeout=30) as p_resp:
+                    async with http.get(f"https://masi.cc.cd/v1/kakao/jobs/{job_id}", headers=poll_headers, timeout=30) as p_resp:
                         p_text = await p_resp.text()
                         try:
                             p_res = json.loads(p_text)
                         except Exception:
                             p_res = {}
-                        order_data = p_res.get("order") or {}
-                        st = order_data.get("status")
-                        logger.info(f"[Masi API] Poll order {order_id} status={st}, body={p_text}")
+                        job_data = (p_res.get("job") or p_res.get("order")) or {}
+                        st = job_data.get("status")
+                        logger.info(f"[Extraction API] Poll job {job_id} status={st}, body={p_text}")
 
                         if st == "completed":
-                            extracted_link = order_data.get("link")
+                            out_data = job_data.get("output") or {}
+                            extracted_link = out_data.get("long_url") or out_data.get("link") or job_data.get("link")
                             break
                         elif st in ("failed", "expired", "canceled", "cancelled"):
-                            err_reason = order_data.get("error") or order_data.get("message") or st
-                            await send_tg_message(http, chat_id, f"**Extraction Failed for Token #{idx}** (Order ID: `{order_id}`)\nReason: `{err_reason}`")
+                            err_reason = job_data.get("error") or job_data.get("message") or st
+                            await send_tg_message(http, chat_id, f"**Extraction Failed for Token #{idx}** (Job ID: `{job_id}`)\nReason: `{err_reason}`")
                             break
                 except Exception as poll_err:
-                    logger.error(f"Polling error for order {order_id}: {repr(poll_err)}")
+                    logger.error(f"Polling error for job {job_id}: {repr(poll_err)}")
 
             if extracted_link:
                 results_delivered += 1
@@ -421,7 +437,7 @@ async def execute_extraction_batch(http, chat_id, tokens):
                 await send_tg_message(http, chat_id, msg_text)
 
         except Exception as job_err:
-            logger.error(f"Order execution error for token #{idx}: {repr(job_err)}")
+            logger.error(f"Extraction error for token #{idx}: {repr(job_err)}")
             await send_tg_message(http, chat_id, f"**Extraction Error for Token #{idx}**: `{repr(job_err)}`")
 
     final_text = f"**Completed! Delivered {results_delivered}/{len(tokens)} Kakao Pay Link(s).**"
