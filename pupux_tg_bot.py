@@ -26,7 +26,7 @@ import re
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8845844055:AAHo-MDyyhRjX0SkHebQ9AjM-TSGLqG0Ap4")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PUPUX_API_BASE = "https://ai.pupux.xyz"
-PROXY_URL = "http://sleepiness29:pmfMiEZSvK@66.93.161.197:50100"  # Hardcoded US Proxy
+PROXY_URL = "http://sleepiness29:pmfMiEZSvK@151.247.50.228:50100"  # Hardcoded US Proxy
 TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
 PAYMENT_METHOD = "kakao"  # Hardcoded to Kakao pay
 AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Initial authorized admins (lowercase)
