@@ -23,18 +23,44 @@ import json
 import re
 
 # --- CONFIGURATION ---
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8845844055:AAHo-MDyyhRjX0SkHebQ9AjM-TSGLqG0Ap4")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8962049506:AAFxHSnEeFUIsxOLNl-iRmBO9S5gfV_JbOQ")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-PUPUX_API_BASE = "https://ai.pupux.xyz"
-PROXY_URL = "http://sleepiness29:pmfMiEZSvK@151.247.50.228:50100"  # Hardcoded US Proxy
+PUPUX_API_BASE = "https://jack-exlink.hjm06.lol"
+PROXY_POOL = [
+    "http://fsie739745-region-VN-sid-hVKgA9KT-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-tLSQ3duP-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-KUrFtqsm-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-nP1Fu9bs-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-PcKT1NsW-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-NSYpLgAj-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-ZuMMzTkc-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-9H8s6YMP-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-SrdhwFdk-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-7jpuzBUE-t-120:snojrd95@us.1024proxy.io:3000"
+]
+EXLINK_PROXIES = [
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-hVKgA9KT-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-tLSQ3duP-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-KUrFtqsm-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-nP1Fu9bs-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-PcKT1NsW-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-NSYpLgAj-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-ZuMMzTkc-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-9H8s6YMP-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-SrdhwFdk-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-7jpuzBUE-t-120:snojrd95"
+]
+PROXY_URL = PROXY_POOL[0]
 TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
-PAYMENT_METHOD = "kakao"  # Hardcoded to Kakao pay
+PAYMENT_METHOD = "momo"  # Hardcoded to MoMo pay
+ACTIVE_CDK = os.getenv("ACTIVE_CDK", "CDK-GIVPJXPCKVC9G7BDDGMJ2SOW")
 AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Initial authorized admins (lowercase)
 STOCK_FILE = "token_stock.txt"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+import random
 from curl_cffi.requests import AsyncSession
 
 # --- AUTO-AUTHENTICATION ENGINE LOADER ---
@@ -67,9 +93,10 @@ async def login_account_credential(cred_str):
     password = parts[1].strip()
     totp_secret = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else None
 
-    logger.info(f"[Pure-HTTP Auth] Logging in {email} via Proxy ({PROXY_URL.split('@')[-1]})...")
+    active_proxy = random.choice(PROXY_POOL)
+    logger.info(f"[Pure-HTTP Auth] Logging in {email} via Proxy ({active_proxy.split('@')[-1]})...")
     try:
-        async with AsyncSession(impersonate="safari15_5", proxy=PROXY_URL if PROXY_URL else None, timeout=25) as session:
+        async with AsyncSession(impersonate="safari15_5", proxy=active_proxy, timeout=25) as session:
             session_entry = await login_pure_request(email, password, totp_secret, session, logger)
             if session_entry and session_entry.access_token:
                 # Detect subscription plan (Plus vs Free)
@@ -336,29 +363,34 @@ async def edit_tg_message(http, chat_id, message_id, text, parse_mode="Markdown"
     except Exception as e:
         logger.error(f"Failed to edit message: {e}")
 
-async def execute_extraction_batch(http, chat_id, tokens):
+async def execute_extraction_batch(http, chat_id, tokens, cdk_override=None):
     global ACTIVE_CDK
 
-    if not ACTIVE_CDK:
-        await send_tg_message(http, chat_id, "**CDK Key is not configured yet!**\nPlease set it using `/setcdk <CDK_KEY>`.")
+    cdk_to_use = cdk_override or ACTIVE_CDK
+
+    if not cdk_to_use:
+        await send_tg_message(http, chat_id, "🔑 **CDK Key Required!**\nPlease enter your CDK key using `/setcdk YOUR_CDK_KEY` or provide it in `/run email|pass|2fa YOUR_CDK`.")
         return
 
     init_res = await send_tg_message(
         http, chat_id,
-        f"**Extracting Kakao Pay Link for {len(tokens)} token(s)...**\n"
-        f"CDK: `{ACTIVE_CDK[:6]}...`"
+        f"**Extracting MoMo Payment Link for {len(tokens)} token(s)...**\n"
+        f"CDK: `{cdk_to_use[:6]}...`"
     )
     status_msg_id = init_res.get("result", {}).get("message_id") if init_res else None
 
-    # 1. Submit Batch Tasks: POST https://ai.pupux.xyz/api/paylinks/tasks/batch
+    # 1. Submit Batch Tasks: POST https://jack-exlink.hjm06.lol/api/paylinks/tasks/batch
     batch_payload = {
-        "payment_method": "kakao",
-        "cdk": ACTIVE_CDK,
-        "access_tokens": tokens
+        "payment_method": "momo",
+        "cdk": cdk_to_use,
+        "access_tokens": tokens,
+        "proxy_mode": "manual",
+        "proxy_type": "http",
+        "proxies": EXLINK_PROXIES
     }
     
     headers = {"Content-Type": "application/json"}
-    logger.info(f"[Pupux API] Submitting batch of {len(tokens)} token(s) with CDK {ACTIVE_CDK[:6]}...")
+    logger.info(f"[MoMo API] Submitting batch of {len(tokens)} token(s) with CDK {cdk_to_use[:6]}...")
 
     task_map = {}
     try:
