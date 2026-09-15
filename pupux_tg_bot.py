@@ -27,28 +27,28 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8962049506:AAFxHSnEeFUIsxOLNl-iRmBO9S5gfV_Jb
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PUPUX_API_BASE = "https://jack-exlink.hjm06.lol"
 PROXY_POOL = [
-    "http://fsie739745-region-VN-sid-hVKgA9KT-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-tLSQ3duP-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-KUrFtqsm-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-nP1Fu9bs-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-PcKT1NsW-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-NSYpLgAj-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-ZuMMzTkc-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-9H8s6YMP-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-SrdhwFdk-t-120:snojrd95@us.1024proxy.io:3000",
-    "http://fsie739745-region-VN-sid-7jpuzBUE-t-120:snojrd95@us.1024proxy.io:3000"
+    "http://fsie739745-region-VN-sid-VaQ5btTy-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-emeQQSyt-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-GJrpQmiE-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-wCssZPcu-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-BAwskRbA-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-YhDqqny5-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-bqsj18zk-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-1ukDvAbg-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-yi3XHC8q-t-120:snojrd95@us.1024proxy.io:3000",
+    "http://fsie739745-region-VN-sid-35ricWBQ-t-120:snojrd95@us.1024proxy.io:3000"
 ]
 EXLINK_PROXIES = [
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-hVKgA9KT-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-tLSQ3duP-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-KUrFtqsm-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-nP1Fu9bs-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-PcKT1NsW-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-NSYpLgAj-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-ZuMMzTkc-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-9H8s6YMP-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-SrdhwFdk-t-120:snojrd95",
-    "us.1024proxy.io:3000:fsie739745-region-VN-sid-7jpuzBUE-t-120:snojrd95"
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-VaQ5btTy-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-emeQQSyt-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-GJrpQmiE-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-wCssZPcu-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-BAwskRbA-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-YhDqqny5-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-bqsj18zk-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-1ukDvAbg-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-yi3XHC8q-t-120:snojrd95",
+    "us.1024proxy.io:3000:fsie739745-region-VN-sid-35ricWBQ-t-120:snojrd95"
 ]
 PROXY_URL = PROXY_POOL[0]
 TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
@@ -93,38 +93,47 @@ async def login_account_credential(cred_str):
     password = parts[1].strip()
     totp_secret = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else None
 
-    active_proxy = random.choice(PROXY_POOL)
-    logger.info(f"[Pure-HTTP Auth] Logging in {email} via Proxy ({active_proxy.split('@')[-1]})...")
-    try:
-        async with AsyncSession(impersonate="safari15_5", proxy=active_proxy, timeout=25) as session:
-            session_entry = await login_pure_request(email, password, totp_secret, session, logger)
-            if session_entry and session_entry.access_token:
-                # Detect subscription plan (Plus vs Free)
-                plan = "free"
-                try:
-                    r = await session.get(
-                        "https://chatgpt.com/api/auth/session",
-                        headers={"Accept": "application/json", "Referer": "https://chatgpt.com/"}
-                    )
-                    if r.status_code == 200:
-                        data = r.json()
-                        p = (data.get("subscription_plan") or (data.get("account") or {}).get("planType") or "").lower()
-                        if p in ("chatgptplusplan", "plus") or "plus" in p:
-                            plan = "plus"
-                        elif "team" in p:
-                            plan = "team"
-                        elif "pro" in p:
-                            plan = "pro"
-                except Exception as plan_err:
-                    logger.warning(f"Plan detection failed for {email}: {plan_err}")
+    # Try up to 3 random proxies from the pool on network/TLS errors
+    proxies_to_try = random.sample(PROXY_POOL, min(len(PROXY_POOL), 3))
+    last_err = "Unknown login error"
 
-                logger.info(f"[Pure-HTTP Auth] Access Token generated for {email} (Plan: {plan})!")
-                return session_entry.access_token, plan, f"Logged in: `{email}` ({plan.upper()})"
-    except Exception as le:
-        logger.error(f"[Pure-HTTP Auth] Login error for {email}: {le}")
-        return None, "free", f"Login failed for `{email}` ({str(le)})"
+    for attempt, active_proxy in enumerate(proxies_to_try, 1):
+        logger.info(f"[Pure-HTTP Auth] (Attempt {attempt}/{len(proxies_to_try)}) Logging in {email} via Proxy ({active_proxy.split('@')[-1]})...")
+        try:
+            async with AsyncSession(impersonate="safari15_5", proxy=active_proxy, timeout=25) as session:
+                session_entry = await login_pure_request(email, password, totp_secret, session, logger)
+                if session_entry and session_entry.access_token:
+                    # Detect subscription plan (Plus vs Free)
+                    plan = "free"
+                    try:
+                        r = await session.get(
+                            "https://chatgpt.com/api/auth/session",
+                            headers={"Accept": "application/json", "Referer": "https://chatgpt.com/"}
+                        )
+                        if r.status_code == 200:
+                            data = r.json()
+                            p = (data.get("subscription_plan") or (data.get("account") or {}).get("planType") or "").lower()
+                            if p in ("chatgptplusplan", "plus") or "plus" in p:
+                                plan = "plus"
+                            elif "team" in p:
+                                plan = "team"
+                            elif "pro" in p:
+                                plan = "pro"
+                    except Exception as plan_err:
+                        logger.warning(f"Plan detection failed for {email}: {plan_err}")
 
-    return None, "free", f"Unknown login error for `{email}`"
+                    logger.info(f"[Pure-HTTP Auth] Access Token generated for {email} (Plan: {plan})!")
+                    return session_entry.access_token, plan, f"Logged in: `{email}` ({plan.upper()})"
+        except Exception as le:
+            last_err = str(le)
+            logger.warning(f"[Pure-HTTP Auth] Attempt {attempt} failed for {email} via {active_proxy.split('@')[-1]}: {le}")
+            # If explicit auth error (wrong password/MFA), don't retry other proxies
+            err_lower = last_err.lower()
+            if "invalid" in err_lower or "password" in err_lower or "credentials" in err_lower or "mfa" in err_lower or "wrong" in err_lower:
+                return None, "free", f"Login failed for `{email}` ({last_err})"
+            await asyncio.sleep(1)
+
+    return None, "free", f"Login failed for `{email}` ({last_err})"
 
 async def process_and_extract_credentials(text, http=None, chat_id=None):
     if not text:
