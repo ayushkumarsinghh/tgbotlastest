@@ -51,6 +51,69 @@ EXLINK_PROXIES = [
     "us.1024proxy.io:3000:fsie739745-region-VN-sid-35ricWBQ-t-120:snojrd95"
 ]
 PROXY_URL = PROXY_POOL[0]
+PROXIES_FILE = "proxies.txt"
+
+def parse_proxy_line(line_str):
+    line_str = line_str.strip()
+    if not line_str or line_str.startswith("#"):
+        return None
+    
+    # URL format: http://user:pass@host:port or https://...
+    if "@" in line_str and ("://" in line_str or line_str.startswith("http")):
+        m = re.match(r'(?:https?://)?([^:]+):([^@]+)@([^:]+):(\d+)', line_str)
+        if m:
+            user, pwd, host, port = m.groups()
+            pool_url = f"http://{user}:{pwd}@{host}:{port}"
+            exlink_str = f"{host}:{port}:{user}:{pwd}"
+            return pool_url, exlink_str
+
+    # 4-part format: host:port:user:pass
+    parts = line_str.split(":")
+    if len(parts) >= 4:
+        host = parts[0].strip()
+        port = parts[1].strip()
+        user = parts[2].strip()
+        pwd = parts[3].strip()
+        if port.isdigit():
+            pool_url = f"http://{user}:{pwd}@{host}:{port}"
+            exlink_str = f"{host}:{port}:{user}:{pwd}"
+            return pool_url, exlink_str
+
+    return None
+
+def save_proxies_to_file(exlink_list):
+    try:
+        with open(PROXIES_FILE, "w", encoding="utf-8") as f:
+            for p in exlink_list:
+                f.write(f"{p}\n")
+    except Exception as e:
+        logger.error(f"Failed to save proxies to file: {e}")
+
+def load_proxies_from_file():
+    if not os.path.exists(PROXIES_FILE):
+        return None, None
+    try:
+        pool_list = []
+        exlink_list = []
+        with open(PROXIES_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                parsed = parse_proxy_line(line)
+                if parsed:
+                    pool_list.append(parsed[0])
+                    exlink_list.append(parsed[1])
+        if pool_list and exlink_list:
+            return pool_list, exlink_list
+    except Exception as e:
+        logger.error(f"Failed to load proxies from file: {e}")
+    return None, None
+
+# Load persisted custom proxies if file exists
+_loaded_pool, _loaded_exlink = load_proxies_from_file()
+if _loaded_pool and _loaded_exlink:
+    PROXY_POOL = _loaded_pool
+    EXLINK_PROXIES = _loaded_exlink
+    PROXY_URL = PROXY_POOL[0]
+
 TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
 PAYMENT_METHOD = "momo"  # Hardcoded to MoMo pay
 ACTIVE_CDK = os.getenv("ACTIVE_CDK", "CDK-GIVPJXPCKVC9G7BDDGMJ2SOW")
@@ -565,7 +628,7 @@ async def execute_extraction_batch(http, chat_id, tokens, cdk_override=None):
         await send_tg_message(http, chat_id, final_msg)
 
 async def handle_update(http, update):
-    global ACTIVE_CDK, AUTHORIZED_WORKERS, LAST_TG_CHAT_ID
+    global ACTIVE_CDK, AUTHORIZED_WORKERS, LAST_TG_CHAT_ID, PROXY_POOL, EXLINK_PROXIES, PROXY_URL
 
     message = update.get("message") or update.get("edited_message")
     if not message:
@@ -599,6 +662,7 @@ async def handle_update(http, update):
             "• `/run <email|pass|2fa>` — Extract MoMo Payment Link & QR directly\n"
             "• `/check <email|pass|2fa>` — Check account plan (Plus/Free) & get Access Token (0 CDK cost)\n"
             "• `/setcdk <CDK_KEY>` — Set active CDK License Key\n"
+            "• `/proxy <list>` — Replace active proxies with new ones\n"
             "• `/status` — View bot configuration & CDK quota stats\n"
             "• `/adduser <@username>` — Authorize a new user\n"
             "• `/removeuser <@username>` — Revoke a user's access"
@@ -632,6 +696,7 @@ async def handle_update(http, update):
             f"**API Provider**: `https://jack-exlink.hjm06.lol` (ExLink WebSocket)\n"
             f"**Payment Method**: `momo` (Vietnam 🇻🇳)\n"
             f"**Active CDK Key**: {cdk_display}\n"
+            f"**Active Proxies**: `{len(PROXY_POOL)}` loaded\n"
             f"**Authorized Users**: {workers_str}\n"
             f"{cdk_info_text}"
         )
@@ -645,6 +710,76 @@ async def handle_update(http, update):
             return
         ACTIVE_CDK = parts[1].strip()
         await send_tg_message(http, chat_id, f"**CDK Key Updated Successfully!**\nNew CDK: `{ACTIVE_CDK}`")
+        return
+
+    if cmd in ["/proxy", "/proxies", "/setproxy"]:
+        parts = text.split(maxsplit=1)
+        raw_arg = parts[1] if len(parts) > 1 else ""
+
+        reply_to = message.get("reply_to_message")
+        if not raw_arg and reply_to:
+            raw_arg = reply_to.get("text", "")
+
+        # If user types /proxy without arguments, show currently active proxies
+        if not raw_arg.strip():
+            preview = "\n".join([f"• `{p}`" for p in EXLINK_PROXIES[:15]])
+            if len(EXLINK_PROXIES) > 15:
+                preview += f"\n_...and {len(EXLINK_PROXIES) - 15} more_"
+            msg = (
+                f"🌐 **Current Active Proxies** (`{len(EXLINK_PROXIES)}` loaded):\n\n"
+                f"{preview}\n\n"
+                f"**To replace all proxies with a new list**:\n"
+                f"Send `/proxy` followed by your proxies (one per line), or reply to a message containing proxies with `/proxy`.\n\n"
+                f"**Accepted Formats**:\n"
+                f"• `host:port:username:password`\n"
+                f"• `http://username:password@host:port`"
+            )
+            await send_tg_message(http, chat_id, msg)
+            return
+
+        new_pool = []
+        new_exlink = []
+        for line in raw_arg.splitlines():
+            line_clean = line.strip()
+            if not line_clean:
+                continue
+            parsed = parse_proxy_line(line_clean)
+            if parsed:
+                pool_u, ex_str = parsed
+                if pool_u not in new_pool:
+                    new_pool.append(pool_u)
+                    new_exlink.append(ex_str)
+
+        if not new_pool:
+            await send_tg_message(
+                http, chat_id,
+                "❌ **No valid proxies found in your input!**\n\n"
+                "Please provide proxies in format:\n"
+                "`host:port:username:password`\n"
+                "Example:\n"
+                "`us.1024proxy.io:3000:username:password`"
+            )
+            return
+
+        # Replace old proxies with new ones
+        PROXY_POOL = new_pool
+        EXLINK_PROXIES = new_exlink
+        PROXY_URL = PROXY_POOL[0]
+        save_proxies_to_file(EXLINK_PROXIES)
+
+        logger.info(f"[Proxy Manager] Replaced proxies with {len(new_pool)} new proxies by @{username}")
+
+        preview = "\n".join([f"• `{p}`" for p in new_exlink[:10]])
+        if len(new_exlink) > 10:
+            preview += f"\n_...and {len(new_exlink) - 10} more_"
+
+        success_msg = (
+            f"✅ **Proxies Updated Successfully!**\n\n"
+            f"Old proxies have been removed. Activated `{len(new_pool)}` new proxy/proxies for authentication and MoMo extraction.\n\n"
+            f"**Active Pool Preview**:\n"
+            f"{preview}"
+        )
+        await send_tg_message(http, chat_id, success_msg)
         return
 
     if cmd in ["/check", "/chk"]:
