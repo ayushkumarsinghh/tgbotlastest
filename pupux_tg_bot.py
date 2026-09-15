@@ -798,8 +798,25 @@ async def poll_discord_channel(http):
             logger.error(f"[Discord Sync] Error polling Discord: {err}")
             await asyncio.sleep(3)
 
+from aiohttp import web
+
+async def health_check(request):
+    return web.Response(text="Bot is online and healthy!", status=200)
+
+async def start_web_server():
+    port = int(os.getenv("PORT", "8080"))
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    app.router.add_get("/health", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"[Web Health] Listening on port {port} for cloud deployment health checks.")
+
 async def main():
-    print(f"[System] Starting Kakao Pay Telegram Bot (Direct Telegram API)...")
+    await start_web_server()
+    print(f"[System] Starting MoMo Telegram Bot (Direct Telegram API)...")
     offset = 0
     async with aiohttp.ClientSession() as http:
         # Verify bot token
