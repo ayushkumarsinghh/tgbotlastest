@@ -115,7 +115,7 @@ if _loaded_pool and _loaded_exlink:
     PROXY_URL = PROXY_POOL[0]
 
 TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT", "10"))
-PAYMENT_METHOD = "momo"  # Hardcoded to MoMo pay
+PAYMENT_METHOD = "upi"  # Hardcoded to UPI pay
 ACTIVE_CDK = os.getenv("ACTIVE_CDK", "CDK-GIVPJXPCKVC9G7BDDGMJ2SOW")
 AUTHORIZED_WORKERS = {"sleepu69", "royfumbler"}  # Initial authorized admins (lowercase)
 STOCK_FILE = "token_stock.txt"
@@ -226,17 +226,17 @@ async def process_and_extract_credentials(text, http=None, chat_id=None):
                             await send_tg_message(
                                 http, chat_id, 
                                 f"`{email}` (**{plan.upper()}**):\n\n"
-                                f"Account is already **{plan.upper()}**! Skipped MoMo link extraction."
+                                f"Account is already **{plan.upper()}**! Skipped UPI link extraction."
                             )
                         else:
                             await send_tg_message(
                                 http, chat_id, 
-                                f"**Authentication Success** (`{email}` | **{plan.upper()}**)\nExtracting MoMo payment link..."
+                                f"**Authentication Success** (`{email}` | **{plan.upper()}**)\nExtracting UPI payment link..."
                             )
                             if ACTIVE_CDK:
                                 asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
                             else:
-                                await send_tg_message(http, chat_id, "**CDK Key is not set!** Please run `/setcdk YOUR_CDK_KEY` in Telegram to enable MoMo link extraction.")
+                                await send_tg_message(http, chat_id, "**CDK Key is not set!** Please run `/setcdk YOUR_CDK_KEY` in Telegram to enable UPI link extraction.")
                 else:
                     if chat_id and http:
                         await send_tg_message(http, chat_id, status_msg)
@@ -423,7 +423,7 @@ async def send_tg_photo(http, chat_id, photo_url, caption="", parse_mode="Markdo
             if caption:
                 form.add_field("caption", caption)
                 form.add_field("parse_mode", parse_mode)
-            form.add_field("photo", io.BytesIO(img_data), filename="momo_qr.png", content_type="image/png")
+            form.add_field("photo", io.BytesIO(img_data), filename="upi_qr.png", content_type="image/png")
             async with http.post(url, data=form) as r:
                 return await r.json()
         else:
@@ -450,7 +450,15 @@ async def edit_tg_message(http, chat_id, message_id, text, parse_mode="Markdown"
     except Exception as e:
         logger.error(f"Failed to edit message: {e}")
 
-async def extract_momo_via_ws(http, chat_id, token, cdk_to_use, status_msg_id=None):
+async def send_heartbeats(ws):
+    try:
+        while True:
+            await ws.send_str(json.dumps({"type": "ping", "request_id": str(uuid.uuid4()), "data": {}}))
+            await asyncio.sleep(15)
+    except (asyncio.CancelledError, Exception):
+        pass
+
+async def extract_upi_via_ws(http, chat_id, token, cdk_to_use, status_msg_id=None):
     ws_url = "wss://jack-exlink.hjm06.lol/api/v1/ws"
     req_id = str(uuid.uuid4())
     submit_payload = {
@@ -458,141 +466,138 @@ async def extract_momo_via_ws(http, chat_id, token, cdk_to_use, status_msg_id=No
         "request_id": req_id,
         "data": {
             "access_token": token,
-            "payment_method": "momo",
+            "payment_method": "upi",
             "discount_strategy": "zero",
             "proxy_mode": "manual",
             "proxy_type": "http",
             "proxies": EXLINK_PROXIES,
-            "checkout_country": "VN",
-            "checkout_currency": "VND",
-            "proxy_country": "VN",
+            "checkout_country": "IN",
+            "checkout_currency": "INR",
+            "proxy_country": "IN",
             "retry_count": 8,
             "cdk": cdk_to_use
         }
     }
 
     try:
-        async with http.ws_connect(ws_url, heartbeat=20) as ws:
+        async with http.ws_connect(ws_url) as ws:
             # Send initial ping
             await ws.send_str(json.dumps({"type": "ping", "request_id": str(uuid.uuid4()), "data": {}}))
             
-            # Send submit
-            logger.info(f"[MoMo WS] Submitting extraction task {req_id[:8]} with CDK {cdk_to_use[:6]}...")
-            await ws.send_str(json.dumps(submit_payload))
+            # Start background heartbeat pinging every 15s so server never closes for inactivity
+            hb_task = asyncio.create_task(send_heartbeats(ws))
+            
+            try:
+                # Send task submit
+                logger.info(f"[UPI WS] Submitting extraction task {req_id[:8]} with CDK {cdk_to_use[:6]}...")
+                await ws.send_str(json.dumps(submit_payload))
 
-            link_url = None
-            qr_sent = False
-            start_t = time.time()
+                link_url = None
+                qr_sent = False
+                start_t = time.time()
 
-            while time.time() - start_t < 240:
-                try:
-                    msg = await asyncio.wait_for(ws.receive(), timeout=25)
-                except asyncio.TimeoutError:
-                    # Send keepalive ping
-                    await ws.send_str(json.dumps({"type": "ping", "request_id": str(uuid.uuid4()), "data": {}}))
-                    continue
+                while time.time() - start_t < 240:
+                    try:
+                        msg = await asyncio.wait_for(ws.receive(), timeout=20)
+                    except asyncio.TimeoutError:
+                        continue
 
-                if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                    logger.error(f"[MoMo WS] WebSocket closed: {msg}")
-                    break
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        logger.error(f"[UPI WS] WebSocket non-text frame ({msg.type}): {msg}")
+                        break
 
-                try:
-                    event_data = json.loads(msg.data)
-                except Exception:
-                    continue
+                    try:
+                        event_data = json.loads(msg.data)
+                    except Exception:
+                        continue
 
-                m_type = event_data.get("type")
-                m_req_id = event_data.get("request_id")
+                    m_type = event_data.get("type")
+                    m_req_id = event_data.get("request_id")
 
-                if m_type in ("status", "announcement", "pong"):
-                    continue
+                    if m_type in ("status", "announcement", "pong"):
+                        continue
 
-                if m_req_id and m_req_id != req_id:
-                    continue
+                    if m_req_id and m_req_id != req_id:
+                        continue
 
-                if m_type == "accepted":
-                    task_tok = event_data.get("task_token")
-                    logger.info(f"[MoMo WS] Task accepted: {task_tok}")
-                    if status_msg_id:
-                        await edit_tg_message(http, chat_id, status_msg_id, "⏳ **Task Accepted** — Generating MoMo link via Vietnam proxy...")
+                    if m_type == "accepted":
+                        task_tok = event_data.get("task_token")
+                        logger.info(f"[UPI WS] Task accepted: {task_tok}")
+                        if status_msg_id:
+                            await edit_tg_message(http, chat_id, status_msg_id, "⏳ **Task Accepted** — Generating UPI payment link...")
 
-                elif m_type == "error":
-                    err_msg = event_data.get("message") or event_data.get("detail") or "Submission error"
-                    logger.error(f"[MoMo WS] Error: {err_msg}")
-                    await send_tg_message(http, chat_id, f"❌ **MoMo Extraction Error**:\n`{err_msg}`")
-                    return False
+                    elif m_type == "error":
+                        err_msg = event_data.get("message") or event_data.get("detail") or "Submission error"
+                        logger.error(f"[UPI WS] Error: {err_msg}")
+                        await send_tg_message(http, chat_id, f"❌ **UPI Extraction Error**:\n`{err_msg}`")
+                        return False
 
-                elif m_type == "event":
-                    ev = event_data.get("event")
-                    d = event_data.get("data") or {}
+                    elif m_type == "event":
+                        ev = event_data.get("event")
+                        d = event_data.get("data") or {}
 
-                    if ev == "queue_status":
-                        pos = d.get("position", 0)
-                        st = d.get("status", "running")
-                        if status_msg_id and st == "queued":
-                            await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Task Queued (Position #{pos})**...")
+                        if ev == "queue_status":
+                            pos = d.get("position", 0)
+                            st = d.get("status", "running")
+                            if status_msg_id and st == "queued":
+                                await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Task Queued (Position #{pos})**...")
 
-                    elif ev == "log":
-                        log_line = d.get("message", "")
-                        logger.info(f"[MoMo WS Log] {log_line}")
-                        if status_msg_id and log_line:
-                            try:
-                                await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Extracting MoMo Link...**\n_{log_line[:120]}_")
-                            except Exception:
-                                pass
-
-                    elif ev == "link_ready":
-                        link_url = d.get("url")
-                        logger.info(f"[MoMo WS] link_ready: {link_url}")
-                        if link_url:
-                            await send_tg_message(http, chat_id, f"🇻🇳 **MoMo Payment Link Ready**:\n`{link_url}`")
-
-                    elif ev == "momo_qr":
-                        qr_sent = True
-                        qr_img = d.get("qr_image_url") or d.get("image_url") or d.get("qr_url") or d.get("url")
-                        redirect_url = d.get("redirect_url") or d.get("url") or link_url
-                        logger.info(f"[MoMo WS] momo_qr received: {d}")
-                        caption = "🇻🇳 **MoMo QR Code (Vietnam)**"
-                        if redirect_url:
-                            caption += f"\n\n🔗 **Payment Link**:\n`{redirect_url}`"
-                        if qr_img:
-                            await send_tg_photo(http, chat_id, qr_img, caption=caption)
-                        else:
-                            await send_tg_message(http, chat_id, caption)
-                        return True
-
-                    elif ev == "done":
-                        logger.info(f"[MoMo WS] done event: {d}")
-                        if qr_sent:
-                            return True
-                        # MoMo QR may arrive right after done; wait up to 10 seconds for it
-                        if link_url:
-                            for _ in range(5):
+                        elif ev == "log":
+                            log_line = d.get("message", "")
+                            logger.info(f"[UPI WS Log] {log_line}")
+                            if status_msg_id and log_line:
                                 try:
-                                    extra_msg = await asyncio.wait_for(ws.receive(), timeout=2.0)
-                                    if extra_msg.type == aiohttp.WSMsgType.TEXT:
-                                        ex_data = json.loads(extra_msg.data)
-                                        if ex_data.get("event") == "momo_qr":
-                                            ex_d = ex_data.get("data") or {}
-                                            qr_img = ex_d.get("qr_image_url") or ex_d.get("image_url") or ex_d.get("qr_url") or ex_d.get("url")
-                                            r_url = ex_d.get("redirect_url") or ex_d.get("url") or link_url
-                                            caption = "🇻🇳 **MoMo QR Code (Vietnam)**"
-                                            if r_url:
-                                                caption += f"\n\n🔗 **Payment Link**:\n`{r_url}`"
-                                            if qr_img:
-                                                await send_tg_photo(http, chat_id, qr_img, caption=caption)
-                                            return True
+                                    await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Extracting UPI Link...**\n_{log_line[:120]}_")
                                 except Exception:
                                     pass
+
+                        elif ev == "link_ready":
+                            link_url = d.get("url") or d.get("upi_payment_url")
+                            logger.info(f"[UPI WS] link_ready: {link_url}")
+                            if link_url:
+                                await send_tg_message(http, chat_id, f"🇮🇳 **UPI Payment Link Ready**:\n`{link_url}`")
+
+                        elif ev in ("upi_qr", "qr", "momo_qr"):
+                            qr_sent = True
+                            qr_img = d.get("qr_image_url") or d.get("image_url") or d.get("qr_url") or d.get("url")
+                            redirect_url = d.get("redirect_url") or d.get("url") or d.get("upi_payment_url") or link_url
+                            logger.info(f"[UPI WS] QR received: {d}")
+                            caption = "🇮🇳 **UPI Payment (India)**"
+                            if redirect_url:
+                                caption += f"\n\n🔗 **Payment Link**:\n`{redirect_url}`"
+                            if qr_img:
+                                await send_tg_photo(http, chat_id, qr_img, caption=caption)
+                            else:
+                                await send_tg_message(http, chat_id, caption)
                             return True
-                        else:
-                            reason = d.get("reason", "Task completed without link")
-                            await send_tg_message(http, chat_id, f"❌ **MoMo Extraction Failed**:\n`{reason}`")
+
+                        elif ev == "done":
+                            logger.info(f"[UPI WS] done event: {d}")
+                            st = d.get("status")
+                            if st == "failure":
+                                err_msg = d.get("message") or d.get("reason") or "Extraction task failed"
+                                await send_tg_message(http, chat_id, f"❌ **UPI Extraction Failed**:\n`{err_msg}`")
+                                return False
+
+                            done_link = d.get("upi_payment_url") or d.get("url") or d.get("payment_url") or link_url
+                            if done_link and not link_url:
+                                link_url = done_link
+                                await send_tg_message(http, chat_id, f"🇮🇳 **UPI Payment Link Ready**:\n`{link_url}`")
+                                return True
+
+                            if qr_sent or link_url:
+                                return True
+
+                            reason = d.get("reason") or d.get("message") or "Task completed without link"
+                            await send_tg_message(http, chat_id, f"❌ **UPI Extraction Failed**:\n`{reason}`")
                             return False
+            finally:
+                hb_task.cancel()
+                await asyncio.gather(hb_task, return_exceptions=True)
 
     except Exception as e:
-        logger.error(f"[MoMo WS] Connection exception: {e}")
-        await send_tg_message(http, chat_id, f"❌ **MoMo WebSocket Error**: `{e}`")
+        logger.error(f"[UPI WS] Connection exception: {e}")
+        await send_tg_message(http, chat_id, f"❌ **UPI WebSocket Error**: `{e}`")
         return False
 
     if not link_url and not qr_sent:
@@ -610,18 +615,18 @@ async def execute_extraction_batch(http, chat_id, tokens, cdk_override=None):
 
     init_res = await send_tg_message(
         http, chat_id,
-        f"🇻🇳 **Starting MoMo Link Extraction for {len(tokens)} token(s)...**\n"
+        f"🇮🇳 **Starting UPI Link Extraction for {len(tokens)} token(s)...**\n"
         f"CDK: `{cdk_to_use[:6]}...`"
     )
     status_msg_id = init_res.get("result", {}).get("message_id") if init_res else None
 
     success_count = 0
     for tok in tokens:
-        ok = await extract_momo_via_ws(http, chat_id, tok, cdk_to_use, status_msg_id)
+        ok = await extract_upi_via_ws(http, chat_id, tok, cdk_to_use, status_msg_id)
         if ok:
             success_count += 1
 
-    final_msg = f"**Completed! Delivered {success_count}/{len(tokens)} MoMo Link(s).**"
+    final_msg = f"**Completed! Delivered {success_count}/{len(tokens)} UPI Link(s).**"
     if status_msg_id:
         await edit_tg_message(http, chat_id, status_msg_id, final_msg)
     else:
@@ -654,12 +659,12 @@ async def handle_update(http, update):
 
     if cmd == "/start":
         welcome_text = (
-            "🇻🇳 **MoMo Instant Link Extractor (Vietnam)**\n\n"
-            "**Quick MoMo Link Generation**:\n"
+            "🇮🇳 **UPI Instant Link Extractor (India)**\n\n"
+            "**Quick UPI Link Generation**:\n"
             "• Simply paste `email|password|2fa_secret` or send `/run email|password|2fa_secret`!\n"
-            "• Pure-HTTP authenticates in 1-2s and delivers your **MoMo Payment Link & QR Code** directly!\n\n"
+            "• Pure-HTTP authenticates in 1-2s and delivers your **UPI Payment Link & QR Code** directly!\n\n"
             "**Commands**:\n"
-            "• `/run <email|pass|2fa>` — Extract MoMo Payment Link & QR directly\n"
+            "• `/run <email|pass|2fa>` — Extract UPI Payment Link & QR directly\n"
             "• `/check <email|pass|2fa>` — Check account plan (Plus/Free) & get Access Token (0 CDK cost)\n"
             "• `/setcdk <CDK_KEY>` — Set active CDK License Key\n"
             "• `/proxy <list>` — Replace active proxies with new ones\n"
@@ -694,7 +699,7 @@ async def handle_update(http, update):
         msg = (
             "**Bot Configuration Status**\n\n"
             f"**API Provider**: `https://jack-exlink.hjm06.lol` (ExLink WebSocket)\n"
-            f"**Payment Method**: `momo` (Vietnam 🇻🇳)\n"
+            f"**Payment Method**: `upi` (India 🇮🇳)\n"
             f"**Active CDK Key**: {cdk_display}\n"
             f"**Active Proxies**: `{len(PROXY_POOL)}` loaded\n"
             f"**Authorized Users**: {workers_str}\n"
@@ -775,7 +780,7 @@ async def handle_update(http, update):
 
         success_msg = (
             f"✅ **Proxies Updated Successfully!**\n\n"
-            f"Old proxies have been removed. Activated `{len(new_pool)}` new proxy/proxies for authentication and MoMo extraction.\n\n"
+            f"Old proxies have been removed. Activated `{len(new_pool)}` new proxy/proxies for authentication and UPI extraction.\n\n"
             f"**Active Pool Preview**:\n"
             f"{preview}"
         )
@@ -1042,7 +1047,7 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    print(f"[System] Starting MoMo Telegram Bot (Direct Telegram API)...")
+    print(f"[System] Starting UPI Telegram Bot (Direct Telegram API)...")
     offset = 0
     async with aiohttp.ClientSession() as http:
         # Verify bot token
