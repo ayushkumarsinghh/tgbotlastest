@@ -23,7 +23,7 @@ import json
 import re
 
 # --- CONFIGURATION ---
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8962049506:AAFxHSnEeFUIsxOLNl-iRmBO9S5gfV_JbOQ")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8902527460:AAGpm3RWI1dH_o9KnjkOJTWHeEVTHVFM5KY")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PUPUX_API_BASE = "https://jack-exlink.hjm06.lol"
 PROXY_POOL = [
@@ -1059,6 +1059,14 @@ async def main():
             bot_info = me_json.get("result", {})
             print(f"Telegram Bot Connected Successfully: @{bot_info.get('username')} ({bot_info.get('first_name')})")
 
+        # Clear any stale webhook to ensure getUpdates never encounters 409 Conflict
+        try:
+            async with http.get(f"{TG_API}/deleteWebhook") as wh_resp:
+                wh_data = await wh_resp.json()
+                logger.info(f"[System] Webhook status: {wh_data.get('description', 'Cleared')}")
+        except Exception as wh_err:
+            logger.warning(f"[System] Could not clear webhook: {wh_err}")
+
         print("[System] Listening for updates 24/7...")
         while True:
             try:
@@ -1069,6 +1077,13 @@ async def main():
                         for update in data.get("result", []):
                             offset = update["update_id"] + 1
                             asyncio.create_task(handle_update(http, update))
+                    else:
+                        err_code = data.get("error_code")
+                        err_desc = data.get("description", "")
+                        logger.warning(f"[Poller] Telegram API notice ({err_code}): {err_desc}")
+                        if err_code == 409 and "webhook" in err_desc.lower():
+                            logger.info("[Poller] Webhook conflict detected. Auto-clearing webhook...")
+                            await http.get(f"{TG_API}/deleteWebhook")
             except asyncio.CancelledError:
                 break
             except Exception as e:
