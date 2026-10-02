@@ -25,7 +25,7 @@ import re
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8902527460:AAGpm3RWI1dH_o9KnjkOJTWHeEVTHVFM5KY")
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-PUPUX_API_BASE = "https://jack-exlink.hjm06.lol"
+PUPUX_API_BASE = "https://api.int31.space"
 PROXY_POOL = [
     "http://fsie739745-region-VN-sid-VaQ5btTy-t-120:snojrd95@us.1024proxy.io:3000",
     "http://fsie739745-region-VN-sid-emeQQSyt-t-120:snojrd95@us.1024proxy.io:3000",
@@ -236,7 +236,7 @@ async def process_and_extract_credentials(text, http=None, chat_id=None):
                             if ACTIVE_CDK:
                                 asyncio.create_task(execute_extraction_batch(http, chat_id, [token]))
                             else:
-                                await send_tg_message(http, chat_id, "**CDK Key is not set!** Please run `/setcdk YOUR_CDK_KEY` in Telegram to enable UPI link extraction.")
+                                await send_tg_message(http, chat_id, "**CDK Key is not set!** Please run `/cdk YOUR_CDK_KEY` in Telegram to enable UPI link extraction.")
                 else:
                     if chat_id and http:
                         await send_tg_message(http, chat_id, status_msg)
@@ -450,167 +450,160 @@ async def edit_tg_message(http, chat_id, message_id, text, parse_mode="Markdown"
     except Exception as e:
         logger.error(f"Failed to edit message: {e}")
 
-async def send_heartbeats(ws):
+async def validate_cdk(http, cdk):
+    url = f"{PUPUX_API_BASE}/public/api/checkout/cdk/validate"
     try:
-        while True:
-            await ws.send_str(json.dumps({"type": "ping", "request_id": str(uuid.uuid4()), "data": {}}))
-            await asyncio.sleep(15)
-    except (asyncio.CancelledError, Exception):
-        pass
-
-async def extract_upi_via_ws(http, chat_id, token, cdk_to_use, status_msg_id=None):
-    ws_url = "wss://jack-exlink.hjm06.lol/api/v1/ws"
-    req_id = str(uuid.uuid4())
-    submit_payload = {
-        "type": "submit",
-        "request_id": req_id,
-        "data": {
-            "access_token": token,
-            "payment_method": "upi",
-            "discount_strategy": "zero",
-            "proxy_mode": "manual",
-            "proxy_type": "http",
-            "proxies": EXLINK_PROXIES,
-            "checkout_country": "IN",
-            "checkout_currency": "INR",
-            "proxy_country": "IN",
-            "retry_count": 8,
-            "cdk": cdk_to_use
-        }
-    }
-
-    try:
-        async with http.ws_connect(ws_url) as ws:
-            # Send initial ping
-            await ws.send_str(json.dumps({"type": "ping", "request_id": str(uuid.uuid4()), "data": {}}))
-            
-            # Start background heartbeat pinging every 15s so server never closes for inactivity
-            hb_task = asyncio.create_task(send_heartbeats(ws))
-            
+        headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+        async with http.post(url, json={"cdk": cdk.strip()}, headers=headers, timeout=10) as resp:
             try:
-                # Send task submit
-                logger.info(f"[UPI WS] Submitting extraction task {req_id[:8]} with CDK {cdk_to_use[:6]}...")
-                await ws.send_str(json.dumps(submit_payload))
+                data = await resp.json()
+            except Exception:
+                data = {"detail": await resp.text()}
+            return resp.status, data
+    except Exception as e:
+        return 500, {"detail": str(e)}
 
-                link_url = None
-                qr_sent = False
-                start_t = time.time()
+async def extract_upi_via_api(http, chat_id, token, cdk_to_use, status_msg_id=None):
+    submit_url = f"{PUPUX_API_BASE}/public/api/checkout/flow/submit-batch"
+    
+    proxy_choice = random.choice(PROXY_POOL) if PROXY_POOL else None
+    req_item = {
+        "cdk": cdk_to_use.strip(),
+        "accessToken": token.strip(),
+        "paymentMethodType": PAYMENT_METHOD.upper(),  # "UPI"
+        "maxAmountCents": 0,
+    }
+    if proxy_choice:
+        req_item["proxyUrl"] = proxy_choice
 
-                while time.time() - start_t < 240:
-                    try:
-                        msg = await asyncio.wait_for(ws.receive(), timeout=20)
-                    except asyncio.TimeoutError:
+    payload = {"requests": [req_item]}
+    headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+
+    try:
+        logger.info(f"[int31 API] Submitting checkout task with CDK {cdk_to_use[:6]}...")
+        async with http.post(submit_url, json=payload, headers=headers, timeout=20) as resp:
+            if resp.status != 200:
+                err_text = await resp.text()
+                try:
+                    err_json = json.loads(err_text)
+                    err_msg = err_json.get("detail") or err_json.get("title") or err_text
+                except Exception:
+                    err_msg = err_text
+                logger.error(f"[int31 API] Submit error (HTTP {resp.status}): {err_msg}")
+                await send_tg_message(http, chat_id, f"❌ **Task Submission Error** (HTTP {resp.status}):\n`{err_msg}`")
+                return False
+
+            submit_data = await resp.json()
+
+        results = submit_data.get("results", [])
+        if not results:
+            await send_tg_message(http, chat_id, "❌ **Task Submission Failed**: Empty result list received from backend.")
+            return False
+
+        first_res = results[0]
+        outcome = first_res.get("outcome")
+        if outcome in ("REJECTED", "UNKNOWN"):
+            err_detail = first_res.get("error") or f"Submission outcome: {outcome}"
+            logger.error(f"[int31 API] Item rejected: {err_detail}")
+            await send_tg_message(http, chat_id, f"❌ **Task Rejected by API**:\n`{err_detail}`")
+            return False
+
+        task_info = first_res.get("task") or {}
+        task_id = task_info.get("taskId")
+        if not task_id:
+            await send_tg_message(http, chat_id, "❌ **Task Submission Error**: Missing taskId in response.")
+            return False
+
+        logger.info(f"[int31 API] Task accepted (ID: {task_id}, Outcome: {outcome})")
+        if status_msg_id:
+            await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Task Accepted ({outcome})**\nTask ID: `{task_id[:8]}...`\nGenerating UPI payment link...")
+
+        # Poll task status: GET /public/api/checkout/flow/{taskId}
+        poll_url = f"{PUPUX_API_BASE}/public/api/checkout/flow/{task_id}"
+        start_time = time.time()
+
+        while time.time() - start_time < 300:  # 5 minutes timeout
+            await asyncio.sleep(4)
+            try:
+                async with http.get(poll_url, headers=headers, timeout=15) as poll_resp:
+                    if poll_resp.status != 200:
+                        logger.warning(f"[int31 API] Poll returned HTTP {poll_resp.status}")
                         continue
+                    snap = await poll_resp.json()
+            except Exception as pe:
+                logger.warning(f"[int31 API] Poll exception: {pe}")
+                continue
 
-                    if msg.type != aiohttp.WSMsgType.TEXT:
-                        logger.error(f"[UPI WS] WebSocket non-text frame ({msg.type}): {msg}")
-                        break
+            status = snap.get("status")
+            step = snap.get("currentStep", "")
+            prog = snap.get("progressPercent", 0)
 
+            logger.info(f"[int31 API] Task {task_id[:8]} -> Status: {status}, Step: {step}, Progress: {prog}%")
+
+            if status in ("QUEUED", "RUNNING"):
+                if status_msg_id and step:
                     try:
-                        event_data = json.loads(msg.data)
+                        await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Extracting UPI Link...** ({prog}%)\n_Step: {step}_\nTask ID: `{task_id[:8]}...`")
                     except Exception:
-                        continue
+                        pass
 
-                    m_type = event_data.get("type")
-                    m_req_id = event_data.get("request_id")
+            elif status == "SUCCEEDED":
+                result = snap.get("result") or {}
+                artifact = result.get("paymentArtifact") or {}
 
-                    if m_type in ("status", "announcement", "pong"):
-                        continue
+                hosted_url = result.get("hostedUrl")
+                jump_url = artifact.get("url") or artifact.get("processorUrl")
+                instructions_url = artifact.get("hostedInstructionsUrl")
+                qr_data = artifact.get("data")
+                qr_img = artifact.get("imageUrlPng") or artifact.get("imageUrlSvg")
 
-                    if m_req_id and m_req_id != req_id:
-                        continue
+                pay_link = jump_url or hosted_url or instructions_url
+                if not pay_link and qr_data and (qr_data.startswith("http") or qr_data.startswith("upi://")):
+                    pay_link = qr_data
 
-                    if m_type == "accepted":
-                        task_tok = event_data.get("task_token")
-                        logger.info(f"[UPI WS] Task accepted: {task_tok}")
-                        if status_msg_id:
-                            await edit_tg_message(http, chat_id, status_msg_id, "⏳ **Task Accepted** — Generating UPI payment link...")
+                caption = f"🇮🇳 **UPI Payment Link Ready (India)**\nTask ID: `{task_id[:8]}`"
+                if pay_link:
+                    caption += f"\n\n🔗 **Payment Link**:\n`{pay_link}`"
 
-                    elif m_type == "error":
-                        err_msg = event_data.get("message") or event_data.get("detail") or "Submission error"
-                        logger.error(f"[UPI WS] Error: {err_msg}")
-                        await send_tg_message(http, chat_id, f"❌ **UPI Extraction Error**:\n`{err_msg}`")
-                        return False
+                if qr_data and not pay_link:
+                    caption += f"\n\n📱 **UPI QR Data / VPA**:\n`{qr_data}`"
 
-                    elif m_type == "event":
-                        ev = event_data.get("event")
-                        d = event_data.get("data") or {}
+                if qr_img:
+                    await send_tg_photo(http, chat_id, qr_img, caption=caption)
+                elif qr_data and qr_data.startswith("data:image"):
+                    await send_tg_photo(http, chat_id, qr_data, caption=caption)
+                else:
+                    await send_tg_message(http, chat_id, caption)
 
-                        if ev == "queue_status":
-                            pos = d.get("position", 0)
-                            st = d.get("status", "running")
-                            if status_msg_id and st == "queued":
-                                await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Task Queued (Position #{pos})**...")
+                return True
 
-                        elif ev == "log":
-                            log_line = d.get("message", "")
-                            logger.info(f"[UPI WS Log] {log_line}")
-                            if status_msg_id and log_line:
-                                try:
-                                    await edit_tg_message(http, chat_id, status_msg_id, f"⏳ **Extracting UPI Link...**\n_{log_line[:120]}_")
-                                except Exception:
-                                    pass
+            elif status == "FAILED":
+                fail_code = snap.get("failureCode") or "UNKNOWN_FAILURE"
+                fail_type = snap.get("failureType") or ""
+                err_display = f"{fail_code} ({fail_type})" if fail_type else fail_code
+                logger.error(f"[int31 API] Task {task_id} failed: {err_display}")
+                await send_tg_message(http, chat_id, f"❌ **UPI Extraction Failed**:\n`{err_display}`\nTask ID: `{task_id}`")
+                return False
 
-                        elif ev == "link_ready":
-                            link_url = d.get("url") or d.get("upi_payment_url")
-                            logger.info(f"[UPI WS] link_ready: {link_url}")
-                            if link_url:
-                                await send_tg_message(http, chat_id, f"🇮🇳 **UPI Payment Link Ready**:\n`{link_url}`")
+            elif status == "CANCELED":
+                logger.warning(f"[int31 API] Task {task_id} canceled")
+                await send_tg_message(http, chat_id, f"⚠️ **Task Canceled** (Task ID: `{task_id}`)")
+                return False
 
-                        elif ev in ("upi_qr", "qr", "momo_qr"):
-                            qr_sent = True
-                            qr_img = d.get("qr_image_url") or d.get("image_url") or d.get("qr_url") or d.get("url")
-                            redirect_url = d.get("redirect_url") or d.get("url") or d.get("upi_payment_url") or link_url
-                            logger.info(f"[UPI WS] QR received: {d}")
-                            caption = "🇮🇳 **UPI Payment (India)**"
-                            if redirect_url:
-                                caption += f"\n\n🔗 **Payment Link**:\n`{redirect_url}`"
-                            if qr_img:
-                                await send_tg_photo(http, chat_id, qr_img, caption=caption)
-                            else:
-                                await send_tg_message(http, chat_id, caption)
-                            return True
-
-                        elif ev == "done":
-                            logger.info(f"[UPI WS] done event: {d}")
-                            st = d.get("status")
-                            if st == "failure":
-                                err_msg = d.get("message") or d.get("reason") or "Extraction task failed"
-                                await send_tg_message(http, chat_id, f"❌ **UPI Extraction Failed**:\n`{err_msg}`")
-                                return False
-
-                            done_link = d.get("upi_payment_url") or d.get("url") or d.get("payment_url") or link_url
-                            if done_link and not link_url:
-                                link_url = done_link
-                                await send_tg_message(http, chat_id, f"🇮🇳 **UPI Payment Link Ready**:\n`{link_url}`")
-                                return True
-
-                            if qr_sent or link_url:
-                                return True
-
-                            reason = d.get("reason") or d.get("message") or "Task completed without link"
-                            await send_tg_message(http, chat_id, f"❌ **UPI Extraction Failed**:\n`{reason}`")
-                            return False
-            finally:
-                hb_task.cancel()
-                await asyncio.gather(hb_task, return_exceptions=True)
+        await send_tg_message(http, chat_id, f"⏱️ **Extraction Timed Out** (5 minutes exceeded for Task `{task_id[:8]}`)")
+        return False
 
     except Exception as e:
-        logger.error(f"[UPI WS] Connection exception: {e}")
-        await send_tg_message(http, chat_id, f"❌ **UPI WebSocket Error**: `{e}`")
+        logger.error(f"[int31 API] Exception: {e}")
+        await send_tg_message(http, chat_id, f"❌ **API Error**: `{e}`")
         return False
-
-    if not link_url and not qr_sent:
-        await send_tg_message(http, chat_id, "⏱️ **Extraction Timed Out** (No link produced within 4 minutes)")
-        return False
-    return True
 
 async def execute_extraction_batch(http, chat_id, tokens, cdk_override=None):
     global ACTIVE_CDK
 
     cdk_to_use = cdk_override or ACTIVE_CDK
     if not cdk_to_use:
-        await send_tg_message(http, chat_id, "🔑 **CDK Key Required!**\nPlease enter your CDK key using `/setcdk YOUR_CDK_KEY` or provide it in `/run email|pass|2fa YOUR_CDK`.")
+        await send_tg_message(http, chat_id, "🔑 **CDK Key Required!**\nPlease enter your CDK key using `/cdk YOUR_CDK_KEY` or provide it in `/run email|pass|2fa YOUR_CDK`.")
         return
 
     init_res = await send_tg_message(
@@ -622,7 +615,7 @@ async def execute_extraction_batch(http, chat_id, tokens, cdk_override=None):
 
     success_count = 0
     for tok in tokens:
-        ok = await extract_upi_via_ws(http, chat_id, tok, cdk_to_use, status_msg_id)
+        ok = await extract_upi_via_api(http, chat_id, tok, cdk_to_use, status_msg_id)
         if ok:
             success_count += 1
 
@@ -666,9 +659,9 @@ async def handle_update(http, update):
             "**Commands**:\n"
             "• `/run <email|pass|2fa>` — Extract UPI Payment Link & QR directly\n"
             "• `/check <email|pass|2fa>` — Check account plan (Plus/Free) & get Access Token (0 CDK cost)\n"
-            "• `/setcdk <CDK_KEY>` — Set active CDK License Key\n"
+            "• `/cdk [KEY]` — View CDK balance/status or set a new CDK key\n"
             "• `/proxy <list>` — Replace active proxies with new ones\n"
-            "• `/status` — View bot configuration & CDK quota stats\n"
+            "• `/status` — View bot configuration & backend status\n"
             "• `/adduser <@username>` — Authorize a new user\n"
             "• `/removeuser <@username>` — Revoke a user's access"
         )
@@ -676,30 +669,43 @@ async def handle_update(http, update):
         return
 
     if cmd == "/status":
-        cdk_display = f"`{ACTIVE_CDK}`" if ACTIVE_CDK else "*Not Set* (Use `/setcdk <KEY>`)"
+        cdk_display = f"`{ACTIVE_CDK}`" if ACTIVE_CDK else "*Not Set* (Use `/cdk <KEY>`)"
         workers_str = ", ".join([f"@{w}" for w in AUTHORIZED_WORKERS]) if AUTHORIZED_WORKERS else "None"
         
         cdk_info_text = ""
         if ACTIVE_CDK:
-            try:
-                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Content-Type": "application/json"}
-                async with http.post(f"{PUPUX_API_BASE}/api/cdks/balance", json={"code": ACTIVE_CDK}, headers=headers, timeout=10) as cdk_resp:
-                    if cdk_resp.status == 200:
-                        cdk_res = await cdk_resp.json()
-                        rem = cdk_res.get("remaining_points", "N/A")
-                        cdk_info_text = (
-                            f"\n**CDK Balance**:\n"
-                            f"• Remaining Points: `{rem}`\n"
-                        )
-                    else:
-                        cdk_info_text = f"\n**CDK Status**: HTTP {cdk_resp.status}\n"
-            except Exception as cdk_err:
-                logger.warning(f"Failed to fetch CDK status: {cdk_err}")
+            st_code, cdk_data = await validate_cdk(http, ACTIVE_CDK)
+            if st_code == 200 and cdk_data.get("valid"):
+                rem = cdk_data.get("remainingUses", 0)
+                resv = cdk_data.get("reservedUses", 0)
+                flow_cost = cdk_data.get("flowUses", 1)
+                concur = cdk_data.get("maxConcurrent", 5)
+                cdk_info_text = (
+                    f"\n**CDK Balance**:\n"
+                    f"• Remaining: `{rem}` | Reserved: `{resv}`\n"
+                    f"• Flow Cost: `{flow_cost}` use(s) | Max Concurrency: `{concur}`\n"
+                )
+            else:
+                detail = cdk_data.get("detail") or cdk_data.get("title") or "Invalid/Unavailable"
+                cdk_info_text = f"\n**CDK Status**: `{detail}` (HTTP {st_code})\n"
+
+        svc_info_text = ""
+        try:
+            async with http.get(f"{PUPUX_API_BASE}/public/api/checkout/flow/status", timeout=8) as s_resp:
+                if s_resp.status == 200:
+                    s_data = await s_resp.json()
+                    accepting = "Yes ✅" if s_data.get("acceptingTasks") else "No ❌"
+                    running = s_data.get("runningTasks", 0)
+                    queued = s_data.get("queuedTasks", 0)
+                    svc_info_text = f"• **Backend Queue**: `{running}` running, `{queued}` queued (Accepting: {accepting})\n"
+        except Exception:
+            pass
 
         msg = (
             "**Bot Configuration Status**\n\n"
-            f"**API Provider**: `https://jack-exlink.hjm06.lol` (ExLink WebSocket)\n"
-            f"**Payment Method**: `upi` (India 🇮🇳)\n"
+            f"**API Provider**: `https://api.int31.space` (Public Checkout Flow API)\n"
+            f"**Payment Method**: `UPI` (India 🇮🇳)\n"
+            f"{svc_info_text}"
             f"**Active CDK Key**: {cdk_display}\n"
             f"**Active Proxies**: `{len(PROXY_POOL)}` loaded\n"
             f"**Authorized Users**: {workers_str}\n"
@@ -708,14 +714,81 @@ async def handle_update(http, update):
         await send_tg_message(http, chat_id, msg)
         return
 
-    if cmd == "/setcdk":
+    if cmd in ["/cdk", "/setcdk"]:
         parts = text.split(maxsplit=1)
-        if len(parts) < 2:
-            await send_tg_message(http, chat_id, "**Usage**: `/setcdk <YOUR_CDK_KEY>`")
+        raw_cdk = parts[1].strip() if len(parts) > 1 else ""
+
+        if raw_cdk:
+            ACTIVE_CDK = raw_cdk
+            st_code, data = await validate_cdk(http, ACTIVE_CDK)
+            if st_code == 200 and data.get("valid"):
+                rem = data.get("remainingUses", 0)
+                resv = data.get("reservedUses", 0)
+                flow_cost = data.get("flowUses", 1)
+                concur = data.get("maxConcurrent", 5)
+                exp = data.get("expiresAt") or "Never"
+                msg = (
+                    f"✅ **CDK Key Updated & Verified!**\n\n"
+                    f"• **Key**: `{ACTIVE_CDK}`\n"
+                    f"• **Remaining Uses**: `{rem}`\n"
+                    f"• **Reserved Uses**: `{resv}`\n"
+                    f"• **Cost Per Flow**: `{flow_cost}` use(s)\n"
+                    f"• **Max Concurrent**: `{concur}`\n"
+                    f"• **Expires**: `{exp}`\n\n"
+                    f"Ready for UPI checkout extraction! 🚀"
+                )
+            else:
+                detail = data.get("detail") or data.get("title") or "Invalid or unavailable"
+                msg = (
+                    f"⚠️ **CDK Key Set, but validation returned notice**:\n\n"
+                    f"• **Key**: `{ACTIVE_CDK}`\n"
+                    f"• **Status** (HTTP {st_code}): `{detail}`\n\n"
+                    f"Please verify this is a valid CDK from api.int31.space."
+                )
+            await send_tg_message(http, chat_id, msg)
             return
-        ACTIVE_CDK = parts[1].strip()
-        await send_tg_message(http, chat_id, f"**CDK Key Updated Successfully!**\nNew CDK: `{ACTIVE_CDK}`")
-        return
+        else:
+            if not ACTIVE_CDK:
+                await send_tg_message(
+                    http, chat_id,
+                    "🔑 **No CDK Currently Active!**\n\n"
+                    "**Usage**:\n"
+                    "`/cdk <YOUR_CDK_KEY>`\n\n"
+                    "Example:\n"
+                    "`/cdk ABCD-1234-EFGH-5678`"
+                )
+                return
+
+            st_code, data = await validate_cdk(http, ACTIVE_CDK)
+            if st_code == 200 and data.get("valid"):
+                rem = data.get("remainingUses", 0)
+                resv = data.get("reservedUses", 0)
+                flow_cost = data.get("flowUses", 1)
+                concur = data.get("maxConcurrent", 5)
+                max_tasks = data.get("maxActiveTasks", 100)
+                exp = data.get("expiresAt") or "Never"
+                msg = (
+                    f"🔑 **Active CDK Status & Balance**\n\n"
+                    f"• **Key**: `{ACTIVE_CDK}`\n"
+                    f"• **Status**: Valid & Active ✅\n"
+                    f"• **Remaining Uses**: `{rem}`\n"
+                    f"• **Reserved Uses**: `{resv}`\n"
+                    f"• **Cost Per Flow**: `{flow_cost}` use(s)\n"
+                    f"• **Max Concurrent**: `{concur}`\n"
+                    f"• **Max Active Tasks**: `{max_tasks}`\n"
+                    f"• **Expires**: `{exp}`\n\n"
+                    f"To update your CDK, send: `/cdk <NEW_KEY>`"
+                )
+            else:
+                detail = data.get("detail") or data.get("title") or "Invalid or unavailable"
+                msg = (
+                    f"⚠️ **Active CDK Validation Notice** (HTTP {st_code}):\n\n"
+                    f"• **Key**: `{ACTIVE_CDK}`\n"
+                    f"• **Status**: `{detail}`\n\n"
+                    f"To update your CDK, send: `/cdk <NEW_KEY>`"
+                )
+            await send_tg_message(http, chat_id, msg)
+            return
 
     if cmd in ["/proxy", "/proxies", "/setproxy"]:
         parts = text.split(maxsplit=1)
